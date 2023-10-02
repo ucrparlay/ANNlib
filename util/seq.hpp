@@ -202,7 +202,7 @@ public:
 		return bound;
 	}
 	const_reference operator[](index_t index) const{
-		return *(begin()[index]);
+		return begin()[index];
 	}
 };
 
