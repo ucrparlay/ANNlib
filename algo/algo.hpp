@@ -145,7 +145,7 @@ Seq prune_simple(
 
 template<class L=lookup_custom_tag<>, class S, class D, class G>
 auto/*Seq*/ prune_heuristic(
-	S &&cand, uint32_t size, D f_dist, G g, const prune_control &ctrl={})
+	S &&cand, uint32_t size, D f_dist, const G &g, const prune_control &ctrl={})
 {
 	using cm = custom<typename L::type>;
 	using Seq = std::remove_cv_t<std::remove_reference_t<S>>;
