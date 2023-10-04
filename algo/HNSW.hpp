@@ -39,10 +39,7 @@ class HNSW
 	template<typename T>
 	using seq = typename cm::seq<T>;
 	using search_control = algo::search_control;
-
-	mutable std::atomic<size_t> total_visited = 0;
-	mutable std::atomic<size_t> total_eval = 0;
-	mutable std::atomic<size_t> total_size_C = 0;
+	using prune_control = algo::prune_control;
 
 public:
 	struct result_t{
@@ -78,14 +75,14 @@ public:
 
 private:
 	struct node_link{
-		coord_t *pcoord;
+		coord_t pcoord; // TODO: optimize type
 		seq<dist_t> dist_nbh;
 
 		coord_t& get_coord(){
-			return *pcoord;
+			return pcoord;
 		}
 		const coord_t& get_coord() const{
-			return *pcoord;
+			return pcoord;
 		}
 	};
 	struct node_ext{
@@ -193,7 +190,6 @@ public:
 		auto cnt_each = util::delayed_seq(n, [&](size_t i){
 			return cnt_degree(l, nid_t(i));
 		});
-		// return cm::reduce(cnt_each.begin(), cnt_each.end()); // TODO: fix
 		return cm::reduce(cnt_each);
 	}
 
@@ -228,7 +224,7 @@ HNSW<Desc>::HNSW(Iter begin, Iter end, uint32_t dim_,
 		std::random_access_iterator_tag, typename std::iterator_traits<Iter>::iterator_category
 	>);
 
-	if(n==0) return;
+	if(n==0) return; // TODO: remove n
 
 	// std::random_device rd;
 	auto perm = cm::random_permutation(n/*, rd()*/);
@@ -237,13 +233,13 @@ HNSW<Desc>::HNSW(Iter begin, Iter end, uint32_t dim_,
 	});
 
 	const auto level_ep = gen_level();
-	const nid_t ep_init = 0;
-	auto ie = layer_b.add_node(ep_init, node_ext{level_ep,begin->get_coord(),{}});
+	const nid_t ep_init = id_map.insert(rand_seq.begin()->get_id());
+	auto ie = layer_b.add_node(ep_init, node_ext{level_ep,rand_seq.begin()->get_coord(),{}});
 	if(level_ep>0)
 	{
 		layer_u.resize(level_ep+1);
 		for(uint32_t l=level_ep; l>0; --l)
-			layer_u[l].add_node(ep_init, node_link{&ie->get_coord(),{}});
+			layer_u[l].add_node(ep_init, node_link{ie->get_coord(),{}});
 	}
 	entrance.push_back(ep_init);
 
@@ -254,6 +250,7 @@ HNSW<Desc>::HNSW(Iter begin, Iter end, uint32_t dim_,
 		batch_begin = batch_end;
 		batch_end = std::min({n, (uint32_t)std::ceil(batch_begin*batch_base)+1, batch_begin+size_limit});
 
+		debug_output("Batch insertion: [%u, %u)\n", batch_begin, batch_end);
 		insert_batch_impl(rand_seq.begin()+batch_begin, rand_seq.begin()+batch_end);
 		// insert(rand_seq.begin()+batch_begin, rand_seq.begin()+batch_end, false);
 
@@ -261,15 +258,21 @@ HNSW<Desc>::HNSW(Iter begin, Iter end, uint32_t dim_,
 		{
 			progress = float(batch_end)/n;
 			fprintf(stderr, "Built: %3.2f%%\n", progress*100);
-			// fprintf(stderr, "# visited: %lu\n", cm::reduce(total_visited));
-			// fprintf(stderr, "# eval: %lu\n", cm::reduce(total_eval));
-			// fprintf(stderr, "size of C: %lu\n", cm::reduce(total_size_C));
+			fprintf(stderr, "# visited: %lu\n", cm::reduce(per_visited));
+			fprintf(stderr, "# eval: %lu\n", cm::reduce(per_eval));
+			fprintf(stderr, "size of C: %lu\n", cm::reduce(per_size_C));
+			per_visited.clear();
+			per_eval.clear();
+			per_size_C.clear();
 		}
 	}
 
-	// fprintf(stderr, "# visited: %lu\n", cm::reduce(total_visited));
-	// fprintf(stderr, "# eval: %lu\n", cm::reduce(total_eval));
-	// fprintf(stderr, "size of C: %lu\n", cm::reduce(total_size_C));
+	fprintf(stderr, "# visited: %lu\n", cm::reduce(per_visited));
+	fprintf(stderr, "# eval: %lu\n", cm::reduce(per_eval));
+	fprintf(stderr, "size of C: %lu\n", cm::reduce(per_size_C));
+	per_visited.clear();
+	per_eval.clear();
+	per_size_C.clear();
 
 	#if 0
 		for(const auto *pu : node_pool)
@@ -291,10 +294,14 @@ template<class Desc>
 template<typename Iter>
 void HNSW<Desc>::insert_batch_impl(Iter begin, Iter end)
 {
-	const auto size_batch = std::distance(begin,end);
+	const size_t size_batch = std::distance(begin,end);
 	seq<uint32_t> level(size_batch);
 	seq<nid_t> nids(size_batch);
 	seq<seq<nid_t>> eps(size_batch);
+
+	per_visited.resize(size_batch);
+	per_eval.resize(size_batch);
+	per_size_C.resize(size_batch);
 
 	// before the insertion, prepare the needed data
 	// `nids[i]` is the nid of the node corresponding to the i-th 
@@ -314,7 +321,7 @@ void HNSW<Desc>::insert_batch_impl(Iter begin, Iter end)
 	// to do so in batches, we sort levels assigned to nodes,
 	// which is equivalent to grouping nodes by level
 	// since the order of points does not matter
-	cm::sort(level.begin(), level.end());
+	cm::sort(level.begin(), level.end(), std::greater<uint32_t>{});
 	auto pos_split = util::pack_index(util::delayed_seq(size_batch, [&](size_t i){
 		return i==0 || level[i-1]!=level[i];
 	}));
@@ -331,17 +338,29 @@ void HNSW<Desc>::insert_batch_impl(Iter begin, Iter end)
 	// note the end of range where level==0 is not yet in `pos_split'
 	for(size_t j=1; j<pos_split.size(); ++j)
 	{
-		const uint32_t l = level[pos_split[j-1]];
-		layer_u[l].add_nodes(
-			util::delayed_seq(pos_split[j]-pos_split[j-1], [&](size_t i){
-				nid_t u = nids[i];
-				return std::pair{u, node_link{&layer_b.get_node(u)->get_coord(),{}}};
-			})
-		);
+		const uint32_t l_hi = level[pos_split[j-1]];
+		const uint32_t l_lo = level[pos_split[j]];
+		for(uint32_t l=l_hi; l>l_lo; --l) // TODO: why isn't it a problem in CPAM
+		{
+			debug_output(
+				"== insert [%u, %u) to layer[%u]\n", 
+				begin->get_id(), (begin+pos_split[j])->get_id(), l
+			);
+			layer_u[l].add_nodes(
+				util::delayed_seq(pos_split[j], [&](size_t i){
+					nid_t u = nids[i];
+					const auto &pcoord = layer_b.get_node(u)->get_coord();
+					return std::pair{u, node_link{pcoord,{}}};
+				})
+			);
+		}
 	}
 
 	pos_split.push_back(size_batch); // complete the range of level 0
-	debug_output(/*results of pack_insert*/);
+	debug_output("results of pos_split: ");
+	for(size_t j : pos_split)
+		debug_output("%lu ", j);
+	debug_output("\n");
 
 	// below we (re)generate edges incident to nodes in the current batch
 	// in the top-to-bottom manner
@@ -354,17 +373,15 @@ void HNSW<Desc>::insert_batch_impl(Iter begin, Iter end)
 	debug_output("Finish searching entrances\n");
 
 	// then we process them layer by layer (`l': current layer)
-	size_t j = 1;
-	seq<std::pair<nid_t,seq_nid>> nbh_forward(size_batch);
+	size_t j = 0;
 	for(int32_t l=std::min(level_ep,level_max); l>=0; --l) // TODO: fix the type
 	{
 		debug_output("Looking for neighbors on lev. %d\n", l);
-		while(level[pos_split[j]]>uint32_t(l))
-			j++;
-		assert(j+1<pos_split.size());
-		debug_output(/*j*/);
 
-		seq<seq<std::pair<nid_t,conn>>> edge_added(size_batch);
+		while(pos_split[j+1]<size_batch && level[pos_split[j+1]]>=l)
+			j++;
+		debug_output("j=%lu l=%d\n", j, l);
+
 		auto set_edges = [&](auto &&...args){
 			if(l==0)
 				layer_b.set_edges(std::forward<decltype(args)>(args)...);
@@ -373,12 +390,16 @@ void HNSW<Desc>::insert_batch_impl(Iter begin, Iter end)
 		};
 
 		// nodes indexed within [0, pos_split[j+1]) have their levels>='l'
+		seq<seq<std::pair<nid_t,conn>>> edge_added(pos_split[j+1]);
+		seq<std::pair<nid_t,seq_nid>> nbh_forward(pos_split[j+1]);
 		cm::parallel_for(0, pos_split[j+1], [&](size_t i){
 			const nid_t u = nids[i];
 
 			auto &eps_u = eps[i];
 			auto search_layer = [&](const auto &g) -> decltype(auto){
-				return algo::beamSearch(g, gen_f_dist(u), eps_u, ef_construction);
+				search_control ctrl; // TODO: use designated intializers in C++20
+				ctrl.log_per_stat = i;
+				return algo::beamSearch(g, gen_f_dist(u), eps_u, ef_construction, ctrl);
 			};
 			auto res = l==0? search_layer(layer_b): search_layer(layer_u[l]);
 
@@ -389,8 +410,11 @@ void HNSW<Desc>::insert_batch_impl(Iter begin, Iter end)
 				eps_u.push_back(c.u);
 
 			auto prune = [&](const auto &g) -> decltype(auto){
+				prune_control ctrl; // TODO: use designated intializers in C++20
+				ctrl.alpha = alpha;
 				return algo::prune_heuristic(
-					std::move(res), get_deg_bound(l), gen_f_dist(u), g
+					std::move(res), get_deg_bound(l), 
+					gen_f_dist(u), g, ctrl
 				);
 			};
 			auto nbh_u = l==0? prune(layer_b): prune(layer_u[l]);
@@ -426,6 +450,16 @@ void HNSW<Desc>::insert_batch_impl(Iter begin, Iter end)
 
 			auto edge_v_old = l==0? layer_b.pop_edges(v): layer_u[l].pop_edges(v);
 			auto &dist_v_old = get_dist_nbh(l,v);
+			/*
+			auto dist_v_old_d = util::delayed_seq(edge_v_old.size(), [&](size_t i){
+				return Desc::distance(
+					layer_b.get_node(v)->get_coord(),
+					layer_b.get_node(edge_v_old[i])->get_coord(),
+					dim
+				);
+			});
+			seq<dist_t> dist_v_old(dist_v_old_d.begin(), dist_v_old_d.end());
+			*/
 			auto nbh_v_old_d = util::zip<seq<conn>>(dist_v_old, edge_v_old);
 			seq<conn> nbh_v_old(nbh_v_old_d.begin(), nbh_v_old_d.end());
 

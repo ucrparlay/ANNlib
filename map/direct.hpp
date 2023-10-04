@@ -2,6 +2,7 @@
 #define _ANN_MAP_DIRECT_HPP
 
 #include <iterator>
+#include <utility>
 #include <type_traits>
 #include "map.hpp"
 
@@ -25,6 +26,14 @@ public:
 			);
 		}
 		else insert(c.begin(), c.end());
+	}
+
+	Nid insert(const Pid &pid){
+		return Nid(pid);
+	}
+
+	Nid insert(Pid &&pid){
+		return Nid(std::move(pid));
 	}
 
 	Pid get_pid(Nid nid) const{

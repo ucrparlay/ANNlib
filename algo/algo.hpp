@@ -10,6 +10,8 @@
 #include <optional>
 #include "ANN.hpp"
 #include "custom.hpp"
+#include "util/debug.hpp"
+using ANN::util::debug_output;
 
 namespace ANN{
 namespace algo{
@@ -70,8 +72,9 @@ auto beamSearch(
 
 		if(++cnt_eval>limit_eval) break;
 
+		nid_t u = cand.begin()->u;
 		cand.erase(cand.begin());
-		for(nid_t pv: g.get_edges(cand.begin()->u))
+		for(nid_t pv: g.get_edges(u))
 		{
 			const auto h_pv = cm::hash64(pv)&mask;
 			if(visited[h_pv]==pv) continue;
@@ -80,7 +83,7 @@ auto beamSearch(
 
 			const auto d = f_dist(g.get_node(pv)->get_coord());
 			if(!(workset.size()<ef||d<workset[0].d)) continue;
-			if(is_inw.insert(pv).second) continue;
+			if(!is_inw.insert(pv).second) continue;
 
 			cand.insert({d,pv});
 			workset.push_back({d,pv});
@@ -96,15 +99,14 @@ auto beamSearch(
 		}
 	}
 
-	/*
 	if(ctrl.log_per_stat)
 	{
 		const auto qid = *ctrl.log_per_stat;
 		per_visited[qid] += cnt_visited;
-		per_eval[qid] += C.size()+cnt_eval;
+		per_eval[qid] += cand.size()+cnt_eval;
 		per_size_C[qid] += cnt_eval;
 	}
-	*/
+
 	return workset;
 }
 
@@ -141,15 +143,16 @@ Seq prune_simple(
 	return cand;
 }
 
-template<class L=lookup_custom_tag<>, class Seq, class D, class G>
-Seq prune_heuristic(
-	Seq &&cand, uint32_t size, D f_dist, G g, const prune_control &ctrl={})
+template<class L=lookup_custom_tag<>, class S, class D, class G>
+auto/*Seq*/ prune_heuristic(
+	S &&cand, uint32_t size, D f_dist, const G &g, const prune_control &ctrl={})
 {
 	using cm = custom<typename L::type>;
+	using Seq = std::remove_cv_t<std::remove_reference_t<S>>;
 	using nid_t = detail::second_elem_t<typename Seq::value_type>;
 	using conn = util::conn<nid_t>;
 
-	Seq workset = std::forward<Seq>(cand);
+	Seq workset = std::forward<S>(cand);
 	/*
 	if(ctrl.extend_nbh)
 	{

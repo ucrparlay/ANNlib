@@ -9,6 +9,8 @@
 #include "graph.hpp"
 #include "custom.hpp"
 #include "util/util.hpp"
+#include "util/debug.hpp"
+using ANN::util::debug_output;
 
 namespace ANN::graph{
 
@@ -83,7 +85,7 @@ protected:
 	}
 	template<class Seq>
 	const Seq get_edges_impl(node_cptr p, util::dummy<Seq>) const{
-		assert(0);
+		assert(0); // TODO: remove assert(0)
 		const auto &origin = get_edges_impl(p, util::dummy<edgelist>{});
 		return Seq(origin.begin(), origin.end());
 	}
@@ -212,7 +214,10 @@ struct map_default : std::unordered_map<Key,T>{
 	using _base::operator[];
 
 	const T& operator[](const Key &key) const{
-		return _base::find(key)->second;
+		auto it = _base::find(key);
+		// TODO: match `Key' type
+		assert(it!=_base::end() || (debug_output("key=%u\n",key),false));
+		return it->second;
 	}
 };
 
@@ -233,7 +238,7 @@ class adj_seq : public adj_base<Nid,Ext,TMapV,TSeqE>
 public:
 	using typename _base::nid_t;
 	using typename _base::node_ptr;
-	using _base::get_node;
+	// using _base::get_node;
 
 private:
 	template<class T>
@@ -244,6 +249,14 @@ private:
 	}
 
 public:
+	auto get_node(nid_t nid){
+		assert(nid<nodes.size());
+		return _base::get_node(nid);
+	}
+	auto get_node(nid_t nid) const{
+		assert(nid<nodes.size());
+		return _base::get_node(nid);
+	}
 	node_ptr add_node(nid_t nid, const Ext &ext){
 		return add_node_impl(nid, ext);
 	}
@@ -261,7 +274,8 @@ public:
 			nodes.resize(nid_max+1);
 
 		cm::parallel_for(0, n, [&](size_t i){
-			nodes[i] = std::get<1>(*(begin+i));
+			// TODO: avoid using nodes
+			nodes[nids[i]] = std::get<1>(*(begin+i));
 		});
 	}
 	template<class Seq>
@@ -308,7 +322,6 @@ public:
 	}
 	template<class Iter>
 	void add_nodes(Iter begin, Iter end){
-		assert(0);
 		nodes.insert(begin, end);
 	}
 	template<class Seq>
