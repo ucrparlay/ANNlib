@@ -190,7 +190,6 @@ public:
 		auto cnt_each = util::delayed_seq(n, [&](size_t i){
 			return cnt_degree(l, nid_t(i));
 		});
-		// return cm::reduce(cnt_each.begin(), cnt_each.end()); // TODO: fix
 		return cm::reduce(cnt_each);
 	}
 
@@ -230,14 +229,12 @@ HNSW<Desc>::HNSW(Iter begin, Iter end, uint32_t dim_,
 	// std::random_device rd;
 	auto perm = cm::random_permutation(n/*, rd()*/);
 	auto rand_seq = util::delayed_seq(n, [&](size_t i) -> decltype(auto){
-		// return *(begin+perm[i]); // TODO: fix it
-		return *(begin+i);
+		return *(begin+perm[i]);
 	});
 
-	// TODO: associate ep_init with the pid of the first point
 	const auto level_ep = gen_level();
-	const nid_t ep_init = 0;
-	auto ie = layer_b.add_node(ep_init, node_ext{level_ep,begin->get_coord(),{}});
+	const nid_t ep_init = id_map.insert(rand_seq.begin()->get_id());
+	auto ie = layer_b.add_node(ep_init, node_ext{level_ep,rand_seq.begin()->get_coord(),{}});
 	if(level_ep>0)
 	{
 		layer_u.resize(level_ep+1);
@@ -401,7 +398,7 @@ void HNSW<Desc>::insert_batch_impl(Iter begin, Iter end)
 			auto &eps_u = eps[i];
 			auto search_layer = [&](const auto &g) -> decltype(auto){
 				search_control ctrl; // TODO: use designated intializers in C++20
-				ctrl.log_per_stat = (begin+i)->get_id()-begin->get_id();
+				ctrl.log_per_stat = i;
 				return algo::beamSearch(g, gen_f_dist(u), eps_u, ef_construction, ctrl);
 			};
 			auto res = l==0? search_layer(layer_b): search_layer(layer_u[l]);
