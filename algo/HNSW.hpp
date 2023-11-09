@@ -15,14 +15,11 @@
 #include <type_traits>
 #include <limits>
 #include <thread>
-#include "graph/adj.hpp"
 #include "algo/algo.hpp"
 #include "map/direct.hpp"
 #include "util/debug.hpp"
 #include "util/helper.hpp"
 #include "custom.hpp"
-using ANN::util::debug_output;
-using ANN::util::delayed_seq;
 
 namespace ANN{
 
@@ -49,18 +46,18 @@ public:
 	/*
 		Construct from the vectors [begin, end).
 		std::iterator_trait<Iter>::value_type ought to be convertible to T
-		dim: 				vector dimension
-		m_l: 				control the # of levels (larger m_l leads to more layer)
-		m: 					max degree
-		ef_construction:	beam size during the construction
-		alpha:				parameter of the heuristic (similar to the one in vamana)
-		batch_base: 		growth rate of the batch size (discarded because of two passes)
+		dim: 		vector dimension
+		m_l: 		control the # of levels (larger m_l leads to more layer)
+		m: 			max degree
+		efc:		beam size during the construction
+		alpha:		parameter of the heuristic (similar to the one in vamana)
+		batch_base: growth rate of the batch size (discarded because of two passes)
 	*/
 	template<typename Iter>
 	HNSW(
 		Iter begin, Iter end,
 		uint32_t dim, float m_l=0.4, 
-		uint32_t m=100, uint32_t ef_construction=50, 
+		uint32_t m=100, uint32_t efc=50, 
 		float alpha=1.0, float batch_base=2
 	);
 	/*
@@ -74,18 +71,13 @@ public:
 	) const;
 
 private:
-	struct node_link{
-		coord_t pcoord; // TODO: optimize type
+	struct node_lite{
 		seq<dist_t> dist_nbh;
 
-		coord_t& get_coord(){
-			return pcoord;
-		}
-		const coord_t& get_coord() const{
-			return pcoord;
-		}
+		coord_t& get_coord(); // not in use
+		const coord_t& get_coord() const; // not in use
 	};
-	struct node_ext{
+	struct node_fat{
 		uint32_t level;
 		coord_t coord;
 		seq<dist_t> dist_nbh;
@@ -98,34 +90,25 @@ private:
 		}
 	};
 
-	class dist_evaluator{
-		std::reference_wrapper<const coord_t> c;
-		uint32_t dim;
-	public:
-		dist_evaluator(const coord_t &c, uint32_t dim) :
-			c(c), dim(dim){
-		}
-		dist_t operator()(const coord_t &cv) const{
-			return Desc::distance(c, cv, dim);
-		}
-		dist_t operator()(const coord_t &cu, const coord_t &cv) const{
-			return Desc::distance(cu, cv, dim);
-		}
-	};
-
 	using seq_nid = seq<nid_t>;
+
+	using graph_fat = typename Desc::graph_t<nid_t,node_fat>;
+	using graph_lite = typename Desc::graph_aux<nid_t,node_lite>;
+
 	// the bottom layer 0 is stored in `layer_b` with all needed data (level, coordinate, etc)
 	// the upper layers 1..lev_ep are stored in `layer_u[]` 
 	// where each node associates with the one representing itself at the bottom layer
-	std::vector<graph::adj_map<nid_t,node_link>> layer_u;
-	graph::adj_seq<nid_t,node_ext> layer_b;
+	// std::vector<graph::adj_map<nid_t,node_lite>> layer_u;
+	std::vector<graph_lite> layer_u;
+	// graph::adj_seq<nid_t,node_fat> layer_b;
+	graph_fat layer_b;
 	map::direct<pid_t,nid_t> id_map;
 
 	seq_nid entrance; // To init
 	uint32_t dim;
 	float m_l;
 	uint32_t m;
-	uint32_t ef_construction;
+	uint32_t efc;
 	float alpha;
 	uint32_t n;
 
@@ -154,10 +137,36 @@ private:
 	}
 
 	auto gen_f_dist(const coord_t &c) const{
-		return dist_evaluator(c, dim);
+
+		class dist_evaluator{
+			std::reference_wrapper<const graph_fat> g;
+			std::reference_wrapper<const coord_t> c;
+			uint32_t dim;
+		public:
+			dist_evaluator(const graph_fat &g, const coord_t &c, uint32_t dim):
+				g(g), c(c), dim(dim){
+			}
+			dist_t operator()(nid_t v) const{
+				return Desc::distance(c, g.get().get_node(v)->get_coord(), dim);
+			}
+			dist_t operator()(nid_t u, nid_t v) const{
+				return Desc::distance(
+					g.get().get_node(u)->get_coord(),
+					g.get().get_node(v)->get_coord(),
+					dim
+				);
+			}
+		};
+
+		return dist_evaluator(layer_b, c, dim);
 	}
 	auto gen_f_dist(nid_t u) const{
 		return gen_f_dist(layer_b.get_node(u)->get_coord());
+	}
+
+	template<class G>
+	auto gen_f_nbhs(const G &g) const{
+		return [&](nid_t u) -> decltype(auto){return g.get_edges(u);};
 	}
 
 	// TODO: eliminate redundant code by deducing 'this' in C++23
@@ -215,9 +224,9 @@ public:
 template<class Desc>
 template<typename Iter>
 HNSW<Desc>::HNSW(Iter begin, Iter end, uint32_t dim_, 
-	float m_l_, uint32_t m_, uint32_t ef_construction, float alpha, float batch_base
+	float m_l_, uint32_t m_, uint32_t efc, float alpha, float batch_base
 ):
-	dim(dim_), m_l(m_l_), m(m_), ef_construction(ef_construction), alpha(alpha), n(std::distance(begin,end))
+	dim(dim_), m_l(m_l_), m(m_), efc(efc), alpha(alpha), n(std::distance(begin,end))
 {
 	static_assert(std::is_same_v<typename std::iterator_traits<Iter>::value_type, point_t>);
 	static_assert(std::is_base_of_v<
@@ -234,12 +243,12 @@ HNSW<Desc>::HNSW(Iter begin, Iter end, uint32_t dim_,
 
 	const auto level_ep = gen_level();
 	const nid_t ep_init = id_map.insert(rand_seq.begin()->get_id());
-	auto ie = layer_b.add_node(ep_init, node_ext{level_ep,rand_seq.begin()->get_coord(),{}});
+	layer_b.add_node(ep_init, node_fat{level_ep,rand_seq.begin()->get_coord(),{}});
 	if(level_ep>0)
 	{
 		layer_u.resize(level_ep+1);
 		for(uint32_t l=level_ep; l>0; --l)
-			layer_u[l].add_node(ep_init, node_link{ie->get_coord(),{}});
+			layer_u[l].add_node(ep_init, node_lite{});
 	}
 	entrance.push_back(ep_init);
 
@@ -250,7 +259,7 @@ HNSW<Desc>::HNSW(Iter begin, Iter end, uint32_t dim_,
 		batch_begin = batch_end;
 		batch_end = std::min({n, (uint32_t)std::ceil(batch_begin*batch_base)+1, batch_begin+size_limit});
 
-		debug_output("Batch insertion: [%u, %u)\n", batch_begin, batch_end);
+		util::debug_output("Batch insertion: [%u, %u)\n", batch_begin, batch_end);
 		insert_batch_impl(rand_seq.begin()+batch_begin, rand_seq.begin()+batch_end);
 		// insert(rand_seq.begin()+batch_begin, rand_seq.begin()+batch_end, false);
 
@@ -331,7 +340,7 @@ void HNSW<Desc>::insert_batch_impl(Iter begin, Iter end)
 
 	layer_b.add_nodes(util::delayed_seq(size_batch, [&](size_t i){
 		// GUARANTEE: only invoke once
-		return std::pair{nids[i], node_ext{level[i],(begin+i)->get_coord(),{}}};
+		return std::pair{nids[i], node_fat{level[i],(begin+i)->get_coord(),{}}};
 	}));
 	if(level_max>level_ep)
 		layer_u.resize(level_max+1);
@@ -342,25 +351,23 @@ void HNSW<Desc>::insert_batch_impl(Iter begin, Iter end)
 		const uint32_t l_lo = level[pos_split[j]];
 		for(uint32_t l=l_hi; l>l_lo; --l) // TODO: why isn't it a problem in CPAM
 		{
-			debug_output(
+			util::debug_output(
 				"== insert [%u, %u) to layer[%u]\n", 
 				begin->get_id(), (begin+pos_split[j])->get_id(), l
 			);
 			layer_u[l].add_nodes(
 				util::delayed_seq(pos_split[j], [&](size_t i){
-					nid_t u = nids[i];
-					const auto &pcoord = layer_b.get_node(u)->get_coord();
-					return std::pair{u, node_link{pcoord,{}}};
+					return std::pair{nids[i], node_lite{}};
 				})
 			);
 		}
 	}
 
 	pos_split.push_back(size_batch); // complete the range of level 0
-	debug_output("results of pos_split: ");
+	util::debug_output("results of pos_split: ");
 	for(size_t j : pos_split)
-		debug_output("%lu ", j);
-	debug_output("\n");
+		util::debug_output("%lu ", j);
+	util::debug_output("\n");
 
 	// below we (re)generate edges incident to nodes in the current batch
 	// in the top-to-bottom manner
@@ -370,17 +377,17 @@ void HNSW<Desc>::insert_batch_impl(Iter begin, Iter end)
 		nid_t u = nids[i];
 		eps[i] = search_layer_to(layer_b.get_node(u)->get_coord(), 1, level[i]);
 	});
-	debug_output("Finish searching entrances\n");
+	util::debug_output("Finish searching entrances\n");
 
 	// then we process them layer by layer (`l': current layer)
 	size_t j = 0;
 	for(int32_t l=std::min(level_ep,level_max); l>=0; --l) // TODO: fix the type
 	{
-		debug_output("Looking for neighbors on lev. %d\n", l);
+		util::debug_output("Looking for neighbors on lev. %d\n", l);
 
 		while(pos_split[j+1]<size_batch && level[pos_split[j+1]]>=l)
 			j++;
-		debug_output("j=%lu l=%d\n", j, l);
+		util::debug_output("j=%lu l=%d\n", j, l);
 
 		auto set_edges = [&](auto &&...args){
 			if(l==0)
@@ -399,7 +406,7 @@ void HNSW<Desc>::insert_batch_impl(Iter begin, Iter end)
 			auto search_layer = [&](const auto &g) -> decltype(auto){
 				search_control ctrl; // TODO: use designated intializers in C++20
 				ctrl.log_per_stat = i;
-				return algo::beamSearch(g, gen_f_dist(u), eps_u, ef_construction, ctrl);
+				return algo::beamSearch(gen_f_nbhs(g), gen_f_dist(u), eps_u, efc, ctrl);
 			};
 			auto res = l==0? search_layer(layer_b): search_layer(layer_u[l]);
 
@@ -414,7 +421,7 @@ void HNSW<Desc>::insert_batch_impl(Iter begin, Iter end)
 				ctrl.alpha = alpha;
 				return algo::prune_heuristic(
 					std::move(res), get_deg_bound(l), 
-					gen_f_dist(u), g, ctrl
+					gen_f_nbhs(g), gen_f_dist(u), ctrl
 				);
 			};
 			auto nbh_u = l==0? prune(layer_b): prune(layer_u[l]);
@@ -436,7 +443,7 @@ void HNSW<Desc>::insert_batch_impl(Iter begin, Iter end)
 			// store for batch insertion
 			nbh_forward[i] = {u, std::move(edge_u)};
 		});
-		debug_output("Adding forward edges\n");
+		util::debug_output("Adding forward edges\n");
 		set_edges(std::move(nbh_forward));
 
 		// now we add edges in the other direction
@@ -482,21 +489,21 @@ void HNSW<Desc>::insert_batch_impl(Iter begin, Iter end)
 			});
 			nbh_backward[j] = {v, std::move(edge_v)};
 		});
-		debug_output("Adding backward edges\n");
+		util::debug_output("Adding backward edges\n");
 		set_edges(std::move(nbh_backward));
 	} // for-loop l
 
 	// finally, update the entrances
-	debug_output("Updating entrance\n");
+	util::debug_output("Updating entrance\n");
 	if(level_max>level_ep)
 	{
-		debug_output("Prompt the ep_level to %u\n", level_max);
+		util::debug_output("Prompt the ep_level to %u\n", level_max);
 		entrance.clear();
 	}
 
 	if(level_max>=level_ep)
 	{
-		debug_output("Insert %lu nodes to the top level\n", pos_split[1]);
+		util::debug_output("Insert %lu nodes to the top level\n", pos_split[1]);
 		entrance.insert(entrance.end(), nids.begin(), nids.begin()+pos_split[1]);
 	}
 }
@@ -512,7 +519,7 @@ Seq HNSW<Desc>::search_layer_to(
 		search_control c{};
 		c.log_per_stat = ctrl.log_per_stat; // whether count dist calculations at all layers
 		// c.limit_eval = ctrl.limit_eval; // whether apply the limit to all layers
-		const auto W = beamSearch(layer_u[l], gen_f_dist(cq), eps, ef, c);
+		const auto W = beamSearch(gen_f_nbhs(layer_u[l]), gen_f_dist(cq), eps, ef, c);
 		eps.clear();
 		eps.push_back(W[0].u);
 		/*
@@ -551,7 +558,7 @@ Seq HNSW<Desc>::search(
 		eps.push_back(*ctrl.indicate_ep);
 	else
 		eps = search_layer_to(cq, 1, 0, ctrl);
-	auto nbhs = beamSearch(layer_b, gen_f_dist(cq), eps, ef, ctrl);
+	auto nbhs = beamSearch(gen_f_nbhs(layer_b), gen_f_dist(cq), eps, ef, ctrl);
 
 	nbhs = algo::prune_simple(std::move(nbhs), k/*, ctrl*/); // TODO: set ctrl
 	cm::sort(nbhs.begin(), nbhs.end());

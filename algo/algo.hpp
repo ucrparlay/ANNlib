@@ -8,6 +8,7 @@
 #include <set>
 #include <unordered_set>
 #include <optional>
+#include <limits>
 #include "ANN.hpp"
 #include "custom.hpp"
 #include "util/debug.hpp"
@@ -34,18 +35,18 @@ struct prune_control{
 	float alpha = 1;
 };
 
-template<class L=lookup_custom_tag<>, class G, class D, class Seq>
+template<class L=lookup_custom_tag<>, class E, class D, class Seq>
 auto beamSearch(
-	const G &g, D f_dist, const Seq &eps, uint32_t ef, const search_control &ctrl={})
+	E &&f_nbhs, D &&f_dist, const Seq &eps, uint32_t ef, const search_control &ctrl={})
 {
 	using cm = custom<typename L::type>;
-	using nid_t = typename G::nid_t;
+	using nid_t = typename Seq::value_type;
 	using conn = util::conn<nid_t>;
 
-	const auto n = g.num_nodes();
+	const auto nid_invalid = std::numeric_limits<nid_t>::max();
 	const uint32_t bits = ef>2? std::ceil(std::log2(ef))*2-2: 2;
 	const uint32_t mask = (1u<<bits)-1;
-	Seq visited(mask+1, n+1);
+	Seq visited(mask+1, nid_invalid);
 	uint32_t cnt_visited = 0;
 	typename cm::seq<conn> workset;
 	std::set<conn> cand; // TODO: test dual heaps
@@ -57,7 +58,7 @@ auto beamSearch(
 	for(nid_t pe : eps)
 	{
 		visited[cm::hash64(pe)&mask] = pe;
-		const auto d = f_dist(g.get_node(pe)->get_coord());
+		const auto d = f_dist(pe);
 		cand.insert({d,pe});
 		workset.push_back({d,pe});
 		is_inw.insert(pe);
@@ -65,7 +66,9 @@ auto beamSearch(
 	std::make_heap(workset.begin(), workset.end());
 
 	uint32_t cnt_eval = 0;
-	uint32_t limit_eval = ctrl.limit_eval.value_or(n);
+	uint32_t limit_eval = ctrl.limit_eval.value_or(
+		std::numeric_limits<uint32_t>::max()
+	);
 	while(cand.size()>0)
 	{
 		if(cand.begin()->d>workset[0].d*ctrl.beta) break;
@@ -74,14 +77,14 @@ auto beamSearch(
 
 		nid_t u = cand.begin()->u;
 		cand.erase(cand.begin());
-		for(nid_t pv: g.get_edges(u))
+		for(nid_t pv: f_nbhs(u))
 		{
 			const auto h_pv = cm::hash64(pv)&mask;
 			if(visited[h_pv]==pv) continue;
 			visited[h_pv] = pv;
 			cnt_visited++;
 
-			const auto d = f_dist(g.get_node(pv)->get_coord());
+			const auto d = f_dist(pv);
 			if(!(workset.size()<ef||d<workset[0].d)) continue;
 			if(!is_inw.insert(pv).second) continue;
 
@@ -143,9 +146,9 @@ Seq prune_simple(
 	return cand;
 }
 
-template<class L=lookup_custom_tag<>, class S, class D, class G>
+template<class L=lookup_custom_tag<>, class S, class E, class D>
 auto/*Seq*/ prune_heuristic(
-	S &&cand, uint32_t size, D f_dist, const G &g, const prune_control &ctrl={})
+	S &&cand, uint32_t size, E &&f_nbhs, D &&f_dist, const prune_control &ctrl={})
 {
 	using cm = custom<typename L::type>;
 	using Seq = std::remove_cv_t<std::remove_reference_t<S>>;
@@ -161,13 +164,13 @@ auto/*Seq*/ prune_heuristic(
 		for(const conn &c : workset)
 		{
 			cand_ext.insert(c.u);
-			for(nid_t pv : g.get_edges(c.u))
+			for(nid_t pv : f_nbhs(c.u))
 				cand_ext.insert(pv);
 		}
 
 		workset.reserve(workset.size()+cand_ext.size());
 		for(nid_t pc : cand_ext)
-			workset.push_back({f_dist(g.get_node(pc).get_coord()), pc});
+			workset.push_back({f_dist(pc), pc});
 		cand_ext.clear();
 	}
 	*/
@@ -182,10 +185,7 @@ auto/*Seq*/ prune_heuristic(
 		bool is_pruned = false;
 		for(const conn &r : res)
 		{
-			const auto d_cr = f_dist(
-				g.get_node(c.u)->get_coord(),
-				g.get_node(r.u)->get_coord()
-			);
+			const auto d_cr = f_dist(c.u, r.u);
 			if(d_cr<d_cu)
 			{
 				is_pruned = true;
@@ -199,7 +199,7 @@ auto/*Seq*/ prune_heuristic(
 		if(!is_pruned)
 		{
 			if(ctrl.prune_nbh)
-				for(nid_t pv : g.get_edges(c.u))
+				for(nid_t pv : f_nbhs(c.u))
 					nbh.insert(pv);
 
 			res.push_back(std::move(c));

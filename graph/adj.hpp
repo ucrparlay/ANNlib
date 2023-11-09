@@ -196,7 +196,7 @@ namespace detail{
 template<typename T, class L=lookup_custom_tag<>>
 struct seq_default_impl : custom<typename L::type>::seq<T>{
 	using _base = typename custom<typename L::type>::template seq<T>;
-	using _base::seq;
+	using _base::_base;
 	using _base::operator=;
 };
 
