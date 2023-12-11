@@ -10,7 +10,8 @@
 #include <optional>
 #include <limits>
 #include "ANN.hpp"
-#include "custom.hpp"
+#include "custom/custom.hpp"
+#include "util/intrin.hpp"
 #include "util/debug.hpp"
 using ANN::util::debug_output;
 
@@ -77,16 +78,16 @@ auto beamSearch(
 
 		nid_t u = cand.begin()->u;
 		cand.erase(cand.begin());
-		for(nid_t pv: f_nbhs(u))
-		{
+
+		util::iter_each(f_nbhs(u), [&](nid_t pv){
 			const auto h_pv = cm::hash64(pv)&mask;
-			if(visited[h_pv]==pv) continue;
+			if(visited[h_pv]==pv) return;
 			visited[h_pv] = pv;
 			cnt_visited++;
 
 			const auto d = f_dist(pv);
-			if(!(workset.size()<ef||d<workset[0].d)) continue;
-			if(!is_inw.insert(pv).second) continue;
+			if(!(workset.size()<ef||d<workset[0].d)) return;
+			if(!is_inw.insert(pv).second) return;
 
 			cand.insert({d,pv});
 			workset.push_back({d,pv});
@@ -99,7 +100,7 @@ auto beamSearch(
 			}
 			if(cand.size()>ef)
 				cand.erase(std::prev(cand.end()));
-		}
+		});
 	}
 
 	if(ctrl.log_per_stat)
@@ -199,8 +200,9 @@ auto/*Seq*/ prune_heuristic(
 		if(!is_pruned)
 		{
 			if(ctrl.prune_nbh)
-				for(nid_t pv : f_nbhs(c.u))
+				util::iter_each(f_nbhs(c.u), [&](nid_t pv){
 					nbh.insert(pv);
+				});
 
 			res.push_back(std::move(c));
 			if(res.size()==size) break;

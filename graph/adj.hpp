@@ -7,8 +7,9 @@
 #include <utility>
 #include <type_traits>
 #include "graph.hpp"
-#include "custom.hpp"
+#include "custom/custom.hpp"
 #include "util/util.hpp"
+#include "util/seq.hpp"
 #include "util/debug.hpp"
 using ANN::util::debug_output;
 

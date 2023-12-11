@@ -19,7 +19,7 @@
 #include "map/direct.hpp"
 #include "util/debug.hpp"
 #include "util/helper.hpp"
-#include "custom.hpp"
+#include "custom/custom.hpp"
 
 namespace ANN{
 
