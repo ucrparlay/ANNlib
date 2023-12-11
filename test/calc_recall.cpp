@@ -14,6 +14,7 @@
 #include "dist.hpp"
 #include "parlay.hpp"
 #include "benchUtils.h"
+#include "aspen.hpp"
 using ANN::HNSW;
 
 parlay::sequence<size_t> per_visited;
@@ -66,6 +67,21 @@ struct desc{
 
 	template<typename Nid, class Ext>
 	using graph_aux = ANN::graph::adj_map<Nid,Ext>;
+};
+
+template<class DescLegacy>
+struct desc_aspen : desc<DescLegacy>{
+	struct empty_weight{};
+
+	template<typename Nid, class Ext>
+	using graph_t = graph_aspen<aspen::versioned_graph<
+		aspen::symmetric_graph<empty_weight,Ext>
+	>>;
+
+	template<typename Nid, class Ext>
+	using graph_aux = graph_aspen<aspen::versioned_graph<
+		aspen::symmetric_graph<empty_weight,Ext>
+	>>;
 };
 
 // Visit all the vectors in the given 2D array of points
@@ -450,7 +466,7 @@ int main(int argc, char **argv)
 	auto run_test_helper = [&](auto type){ // emulate a generic lambda in C++20
 		using T = decltype(type);
 		if(!strcmp(dist_func,"L2"))
-			run_test<desc<descr_l2<T>>>(parameter);
+			run_test<desc_aspen<descr_l2<T>>>(parameter);
 		/*
 		else if(!strcmp(dist_func,"angular"))
 			run_test<desc<descr_ang<T>>>(parameter);

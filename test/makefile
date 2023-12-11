@@ -2,7 +2,9 @@ CXX = g++
 #CXX = clang++
 DIR_FMWK = ../
 DIR_PARLAY = parlaylib/include
-DIR_INCLUDE = $(DIR_FMWK) $(DIR_PARLAY)
+DIR_CPAM = CPAM/include
+DIR_CPAM_ASPEN = CPAM/examples/graphs/aspen
+DIR_INCLUDE = $(DIR_FMWK) $(DIR_PARLAY) $(DIR_CPAM) $(DIR_CPAM_ASPEN)
 
 CXXFLAGS_BASIC = -std=c++17 -Wall -Wextra -march=native -pthread $(DIR_INCLUDE:%=-I%)
 ifeq (DEBUG, $(MODE))
