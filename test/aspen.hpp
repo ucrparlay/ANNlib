@@ -7,18 +7,20 @@
 #include "util/util.hpp"
 #include "util/seq.hpp"
 #include "custom/custom.hpp"
-#include "aspen.h"
+#include "pam/pam.h"
+#include "cpam/cpam.h"
+#include "immutable_graph.h"
 
-template<class VGraph>
+template<class SGraph>
 class graph_aspen
 {
-	using graph_t = typename VGraph::graph_t;
+	using graph_t = SGraph;
 	using vtx_t = typename graph_t::vertex;
 	using ext_t = typename graph_t::ext_t;
 	using vinfo_t = typename graph_t::vinfo;
 	using edge_tree = typename graph_t::edge_tree;
 
-	using cm = ANN::custom<typename ANN::lookup_custom_tag<VGraph>::type>;
+	using cm = ANN::custom<typename ANN::lookup_custom_tag<SGraph>::type>;
 
 public:
 	using nid_t = decltype(vtx_t::id);
@@ -34,10 +36,10 @@ private:
 		using ref_t = std::conditional_t<IsConst, const attr_t&, attr_t&>;
 
 		ref_t operator*() const{
-			return const_cast<attr_t&>(std::get<1>(vtx.edges.base()));
+			return *vtx.attr;
 		}
 		ptr_t operator->() const{
-			return &operator*();
+			return vtx.attr;
 		}
 
 	protected:
@@ -113,43 +115,28 @@ private:
 
 	template<class T>
 	node_ptr add_node_impl(nid_t u, T &&ext){
-		auto &g = snapshot.graph;
 		g.insert_vertex_inplace(u, {nullptr,ext});
 		return get_node(u);
 	}
 
 public:
-	graph_aspen() :
-		vg(std::make_shared<VGraph>()),
-		snapshot(vg->acquire_version())
-	{
-	}
-	~graph_aspen()
-	{
-		vg->release_version(std::move(snapshot));
-	}
+	graph_aspen() = default;
+	graph_aspen(const graph_aspen&) = default;
+	graph_aspen& operator=(const graph_aspen&) = default;
 
-	graph_aspen(graph_aspen&&) = default;
-	graph_aspen& operator=(graph_aspen&&) = default;
-
-	graph_aspen(const graph_aspen &other) :
-		vg(other.vg),
-		snapshot(vg->acquire_version(other.snapshot.timestamp))
-	{
+	// add the missing noexcept specifier in the underlying structures
+	graph_aspen(graph_aspen &&other) noexcept :
+		g(std::move(other.g)){
 	}
-	graph_aspen& operator=(const graph_aspen &other)
-	{
-		snapshot = other.vg->acquire_version(other.snapshot.timestamp);
-		vg = other.vg;
+	graph_aspen& operator=(graph_aspen &&other) noexcept{
+		g = std::move(other.g);
 		return *this;
 	}
 
 	node_ptr get_node(nid_t u){
-		auto &g = snapshot.graph;
 		return g.get_vertex(u); // TODO: unify the name
 	}
 	node_cptr get_node(nid_t u) const{
-		const auto &g = snapshot.graph;
 		return g.get_vertex(u); // TODO: unify the name
 	}
 
@@ -190,16 +177,15 @@ public:
 			vinfo_t operator()(const vinfo_t &cur, const vinfo_t &inc) const{
 				edge_tree t;
 				t.root = cur;
-				return vinfo_t(std::get<0>(inc), std::get<1>(cur));
+				return vinfo_t(inc.get_edges(), cur.get_attr());
 			}
 			vinfo_t operator()(vinfo_t &&cur, vinfo_t &&inc) const{
 				edge_tree t;
 				t.root = cur;
-				return vinfo_t(std::get<0>(inc), std::get<1>(std::move(cur)));
+				return vinfo_t(inc.get_edges(), std::move(cur.get_attr()));
 			}
 		};
 
-		auto &g = snapshot.graph;
 		g.insert_vertices_batch(vs.size(), vs.data(), comb());
 	}
 
@@ -228,7 +214,6 @@ public:
 		using vs_t = typename cm::seq<vertex_entry_t>;
 		vs_t vs(vs_delayed.begin(), vs_delayed.end());
 
-		auto &g = snapshot.graph;
 		g.insert_vertices_batch(vs.size(), vs.data());
 	}
 
@@ -243,8 +228,9 @@ public:
 	}
 
 private:
-	std::shared_ptr<VGraph> vg;
-	typename VGraph::version snapshot;
+	// std::shared_ptr<VGraph> vg;
+	// typename VGraph::version snapshot;
+	SGraph g;
 };
 
 #endif // _ANN_TEST_ASPEN_HPP

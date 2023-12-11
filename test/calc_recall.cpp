@@ -74,14 +74,14 @@ struct desc_aspen : desc<DescLegacy>{
 	struct empty_weight{};
 
 	template<typename Nid, class Ext>
-	using graph_t = graph_aspen<aspen::versioned_graph<
+	using graph_t = graph_aspen<
 		aspen::symmetric_graph<empty_weight,Ext>
-	>>;
+	>;
 
 	template<typename Nid, class Ext>
-	using graph_aux = graph_aspen<aspen::versioned_graph<
+	using graph_aux = graph_aspen<
 		aspen::symmetric_graph<empty_weight,Ext>
-	>>;
+	>;
 };
 
 // Visit all the vectors in the given 2D array of points
