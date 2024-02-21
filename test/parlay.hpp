@@ -79,10 +79,12 @@ public:
 		);
 	}
 
-	// TODO: remove this method
 	static auto worker_id()
 	{
 		return parlay::worker_id();
+	}
+	static size_t num_workers(){
+		return parlay::num_workers();
 	}
 
 	template<template<typename> class TSeq=seq, typename T>

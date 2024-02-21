@@ -172,6 +172,18 @@ private:
 		};
 	}
 
+	template<class Op>
+	auto calc_degs(uint32_t l, Op op) const{
+		auto impl = [&](const auto &g){
+			seq<size_t> degs(cm::num_workers(), 0);
+			g.for_each([&](auto p){
+				auto &deg = degs[cm::worker_id()];
+				deg = op(deg, g.get_edges(p).size());
+			});
+			return cm::reduce(degs, 0, op);
+		};
+		return l==0? impl(layer_b): impl(layer_u[l]);
+	}
 
 public:
 	uint32_t get_height(nid_t u) const
@@ -184,37 +196,22 @@ public:
 		return get_height(entrance[0]);
 	}
 
-	size_t cnt_degree(uint32_t l, nid_t u) const{
-		uint32_t level_u = get_height(u);
-		return level_u<l? 0:
-			l==0? layer_b.get_edges(u).size():
-			layer_u[l].get_edges(u).size();
-	}
-	size_t cnt_degree(uint32_t l) const
-	{
-		auto cnt_each = util::delayed_seq(
-			l==0? layer_b.num_nodes(): layer_u[l].num_nodes(),
-			[&](size_t i){return cnt_degree(l, nid_t(i));}
-		);
-		return cm::reduce(cnt_each);
+	size_t num_nodes(uint32_t l) const{
+		return l==0? layer_b.num_nodes(): layer_u[l].num_nodes();
 	}
 
-	size_t cnt_vertex(uint32_t l) const
-	{
-		auto cnt_each = util::delayed_seq(
-			l==0? layer_b.num_nodes(): layer_u[l].num_nodes(),
-			[&](size_t i){return get_height(nid_t(i))<l? 0: 1;}
-		);
-		return cm::reduce(cnt_each);
+	size_t num_edges(uint32_t l, nid_t u) const{
+		auto num_edges_impl = [u](const auto &g){
+			return g.get_edges(u).size();
+		};
+		return num_edges_impl(l==0? layer_b: layer_u[l]);
+	}
+	size_t num_edges(uint32_t l) const{
+		return calc_degs(l, std::plus<>{});
 	}
 
-	size_t get_degree_max(uint32_t l) const
-	{
-		auto cnt_each = util::delayed_seq(
-			l==0? layer_b.num_nodes(): layer_u[l].num_nodes(),
-			[&](size_t i){return cnt_degree(l, nid_t(i));}
-		);
-		return cm::reduce(cnt_each, 0, [](size_t x, size_t y){
+	size_t max_deg(uint32_t l) const{
+		return calc_degs(l, [](size_t x, size_t y){
 			return std::max(x, y);
 		});
 	}

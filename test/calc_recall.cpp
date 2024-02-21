@@ -428,10 +428,10 @@ void run_test(commandLine parameter) // intend to be pass-by-value manner
 	for(uint32_t i=0; i<=height; ++i)
 	{
 		const uint32_t level = height-i;
-		size_t cnt_vertex = g.cnt_vertex(level);
-		size_t cnt_degree = g.cnt_degree(level);
-		size_t degree_max = g.get_degree_max(level);
-		printf("#%2u: %14lu %16lu %11lu\n", level, cnt_vertex, cnt_degree, degree_max);
+		size_t num_nodes = g.num_nodes(level);
+		size_t num_edges = g.num_edges(level);
+		size_t max_deg = g.max_deg(level);
+		printf("#%2u: %14lu %16lu %11lu\n", level, num_nodes, num_edges, max_deg);
 	}
 	t.next("Count vertices and degrees");
 

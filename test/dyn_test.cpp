@@ -103,8 +103,8 @@ void print_stat(const G &g)
 	for(uint32_t i=0; i<=height; ++i)
 	{
 		const uint32_t level = height-i;
-		size_t cnt_vertex = g.cnt_vertex(level);
-		size_t cnt_degree = g.cnt_degree(level);
+		size_t cnt_vertex = g.num_nodes(level);
+		size_t cnt_degree = g.num_edges(level);
 		printf("#%2u: %14lu %16lu %10.2f\n", 
 			level, cnt_vertex, cnt_degree, float(cnt_degree)/cnt_vertex
 		);
