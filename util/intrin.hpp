@@ -3,6 +3,8 @@
 
 #include <cstdint>
 #include <iterator>
+#include <type_traits>
+#include "util/util.hpp"
 #include "custom/custom.hpp"
 
 namespace ANN::util{
@@ -84,6 +86,33 @@ void for_each(R &&r, F &&f)
 	else iter_each(std::forward<R>(r), std::forward<F>(f));
 }
 
+template<class C, class R, class F=identity>
+C to(R &&r)
+{
+	static_assert(std::is_convertible_v<R,C>);
+	return r;
+}
+
+/*
+template<class C, class R, class F=identity>
+C to(R &&r, F &&f={})
+{
+	if constexpr(requires(size() and reserve()))
+	{
+		reserve(size())
+	}
+	handle move semantics
+	- direct construct
+	- from_range_t
+	- iter-pair
+	- push_back/insert
+}
+template<class C, class F=identity>
+C tabulate(size_t n, F &&f={})
+{
+	return to<C>(delayed_seq(n,f));
+}
+*/
 } // namespace ANN::util
 
 #endif // _ANN_UTIL_INTRIN_HPP

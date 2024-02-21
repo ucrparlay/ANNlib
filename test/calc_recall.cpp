@@ -62,11 +62,11 @@ struct desc{
 		return DescLegacy::distance(cu, cv, dim);
 	}
 
-	template<typename Nid, class Ext>
-	using graph_t = ANN::graph::adj_seq<Nid,Ext>;
+	template<typename Nid, class Ext, class Edge=Nid>
+	using graph_t = ANN::graph::adj_seq<Nid,Ext,Edge>;
 
-	template<typename Nid, class Ext>
-	using graph_aux = ANN::graph::adj_map<Nid,Ext>;
+	template<typename Nid, class Ext, class Edge=Nid>
+	using graph_aux = ANN::graph::adj_map<Nid,Ext,Edge>;
 };
 
 template<class DescLegacy>

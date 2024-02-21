@@ -9,6 +9,7 @@
 #include "graph.hpp"
 #include "custom/custom.hpp"
 #include "util/util.hpp"
+#include "util/intrin.hpp"
 #include "util/seq.hpp"
 #include "util/debug.hpp"
 using ANN::util::debug_output;
@@ -16,7 +17,7 @@ using ANN::util::debug_output;
 namespace ANN::graph{
 
 template<
-	class Nid, class Ext,
+	class Nid, class Ext, class Edge,
 	template<typename,typename> class TCtrV, 
 	template<typename> class TCtrE>
 class adj_base : base
@@ -26,7 +27,7 @@ public:
 
 protected:
 	using cm = custom<typename lookup_custom_tag<Nid>::type>;
-	using edgelist = TCtrE<nid_t>;
+	using edgelist = TCtrE<Edge>;
 	struct node_t : Ext{
 		node_t() = default;
 		node_t(const Ext &ext) : Ext(ext){
@@ -35,27 +36,27 @@ protected:
 		}
 		using Ext::operator=;
 
-		mutable edgelist neighbors;
+		edgelist neighbors;
 	};
 	using nodelist = TCtrV<nid_t,node_t>;
 
 private:
 	template<bool IsConst>
 	struct ptr_base{
-		using ptr_t = std::conditional_t<IsConst, const Ext*, Ext*>;
-		using ref_t = std::conditional_t<IsConst, const Ext&, Ext&>;
+		using ptr_t = const Ext*;
+		using ref_t = const Ext&;
 
 		ref_t operator*() const{
-			return *ptr;
+			return *raw;
 		}
 		ptr_t operator->() const{
-			return ptr;
+			return raw;
 		}
 
 	protected:
-		using U = std::conditional_t<IsConst, const node_t, node_t>;
-		U *ptr;
-		ptr_base(U *p) : ptr(p){
+		using data_t = std::conditional_t<IsConst, const node_t*, node_t*>;
+		data_t raw;
+		ptr_base(data_t raw) : raw(raw){
 		}
 
 		friend class adj_base;
@@ -69,20 +70,27 @@ public:
 	struct node_cptr : ptr_base<true>{
 		using ptr_base<true>::ptr_base;
 		node_cptr(const node_ptr &other) :
-			ptr_base<true>(other.ptr){
+			ptr_base<true>(other.raw){
 		}
 	};
 
 protected:
+	static node_ptr gen_node_ptr(node_t *p){
+		return node_ptr(p);
+	}
+	static node_cptr gen_node_cptr(const node_t *p){
+		return node_cptr(p);
+	}
+
 	template<class T>
 	node_ptr set_node_impl(nid_t nid, T &&ext){
 		node_ptr p = get_node(nid);
-		*(p.ptr) = std::forward<T>(ext);
+		*(p.raw) = std::forward<T>(ext);
 		return p;
 	}
 
 	const edgelist& get_edges_impl(node_cptr p, util::dummy<edgelist>) const{
-		return p.ptr->neighbors;
+		return p.raw->neighbors;
 	}
 	template<class Seq>
 	const Seq get_edges_impl(node_cptr p, util::dummy<Seq>) const{
@@ -91,16 +99,16 @@ protected:
 		return Seq(origin.begin(), origin.end());
 	}
 
-	edgelist pop_edges_impl(node_cptr p, util::dummy<edgelist>){
-		edgelist &nbhs = p.ptr->neighbors;
+	edgelist pop_edges_impl(node_ptr p, util::dummy<edgelist>){
+		edgelist &nbhs = p.raw->neighbors;
 		edgelist edges = std::move(nbhs);
 		nbhs.clear();
 		return edges;
 	}
 	template<class Seq>
-	Seq pop_edges_impl(node_cptr p, util::dummy<Seq>){
+	Seq pop_edges_impl(node_ptr p, util::dummy<Seq>){
 		assert(0);
-		edgelist &nbhs = p.ptr->neighbors;
+		edgelist &nbhs = p.raw->neighbors;
 		// TODO: use `Seq(std::from_range, nbhs)` in C++23
 		Seq edges(
 			std::make_move_iterator(nbhs.begin()),
@@ -135,7 +143,7 @@ public:
 	}
 
 	template<typename Seq=edgelist>
-	Seq pop_edges(node_cptr p){
+	Seq pop_edges(node_ptr p){
 		return pop_edges_impl(p, util::dummy<Seq>{});
 	}
 	template<class Seq=edgelist>
@@ -146,11 +154,11 @@ public:
 	template<class Seq>
 	void set_edges(node_ptr p, Seq&& es){
 		if constexpr(std::is_same_v<std::remove_reference_t<Seq>,edgelist>){
-			p.ptr->neighbors = std::forward<Seq>(es);
+			p.raw->neighbors = std::forward<Seq>(es);
 		}
 		else{
 			assert(0);
-			p.ptr->neighbors = edgelist(es.begin(),es.end());
+			p.raw->neighbors = edgelist(es.begin(),es.end());
 		}
 	}
 	template<class Iter>
@@ -159,7 +167,7 @@ public:
 		const auto n = std::distance(begin, end);
 		cm::parallel_for(0, n, [&](size_t i){
 			auto &&[nid,es] = *(begin+i);
-			get_node(nid).ptr->neighbors = std::forward<decltype(es)>(es);
+			get_node(nid).raw->neighbors = std::forward<decltype(es)>(es);
 		});
 	}
 	template<class Seq>
@@ -180,15 +188,11 @@ public:
 		set_edges(get_node(nid), std::forward<Seq>(es));
 	}
 
-	size_t get_degree(node_cptr p) const{
-		return p.ptr->neighbors.size();
-	}
-	size_t get_degree(nid_t nid) const{
-		return get_degree(get_node(nid));
-	}
-
 	size_t num_nodes() const{
 		return nodes.size();
+	}
+	bool empty() const{
+		return nodes.empty();
 	}
 
 protected:
@@ -228,14 +232,14 @@ struct map_default : std::unordered_map<Key,T>{
 } // namespace detail
 
 template<
-	class Nid, class Ext,
+	class Nid, class Ext, class Edge=Nid,
 	template<typename,typename> class TMapV=detail::map_seq,
 	template<typename> class TSeqE=detail::seq_default>
-class adj_seq : public adj_base<Nid,Ext,TMapV,TSeqE>
+class adj_seq : public adj_base<Nid,Ext,Edge,TMapV,TSeqE>
 {
 	static_assert(std::is_default_constructible_v<Ext>);
 
-	using _base = adj_base<Nid,Ext,TMapV,TSeqE>;
+	using _base = adj_base<Nid,Ext,Edge,TMapV,TSeqE>;
 
 	using typename _base::cm;
 	using _base::nodes;
@@ -244,6 +248,8 @@ class adj_seq : public adj_base<Nid,Ext,TMapV,TSeqE>
 public:
 	using typename _base::nid_t;
 	using typename _base::node_ptr;
+	using _base::gen_node_ptr;
+	using _base::gen_node_cptr;
 	// using _base::get_node;
 
 private:
@@ -297,15 +303,43 @@ public:
 		}
 		else add_nodes(ns.begin(), ns.end());
 	}
+
+	template<class F>
+	void iter_each(F &&f) const{
+		for(const auto &u : nodes)
+			f(gen_node_cptr(&u));
+	}
+	template<class F>
+	void iter_each(F &&f){
+		for(auto &u : nodes)
+			f(gen_node_ptr(&u));
+	}
+	// TODO: eliminate redundant code by deducing 'this' in C++23
+	template<class F>
+	void for_each(F &&f) const{
+		cm::parallel_for(0, nodes.size(),
+			[&,it=nodes.begin()](size_t i){
+				f(gen_node_cptr(&it[i]));
+			}
+		);
+	}
+	template<class F>
+	void for_each(F &&f){
+		cm::parallel_for(0, nodes.size(),
+			[&,it=nodes.begin()](size_t i){
+				f(gen_node_ptr(&it[i]));
+			}
+		);
+	}
 };
 
 template<
-	class Nid, class Ext,
+	class Nid, class Ext, class Edge=Nid,
 	template<typename,typename> class TMapV=detail::map_default,
 	template<typename> class TSeqE=detail::seq_default>
-class adj_map : public adj_base<Nid,Ext,TMapV,TSeqE>
+class adj_map : public adj_base<Nid,Ext,Edge,TMapV,TSeqE>
 {
-	using _base = adj_base<Nid,Ext,TMapV,TSeqE>;
+	using _base = adj_base<Nid,Ext,Edge,TMapV,TSeqE>;
 	using typename _base::node_t;
 	using _base::nodes;
 	using _base::set_node_impl;
@@ -313,6 +347,8 @@ class adj_map : public adj_base<Nid,Ext,TMapV,TSeqE>
 public:
 	using typename _base::nid_t;
 	using typename _base::node_ptr;
+	using _base::gen_node_ptr;
+	using _base::gen_node_cptr;
 	using _base::get_node;
 
 private:
@@ -344,6 +380,32 @@ public:
 			);
 		}
 		else add_nodes(ns.begin(), ns.end());
+	}
+
+	// TODO: eliminate redundant code by deducing 'this' in C++23
+	template<class F>
+	void iter_each(F &&f) const{
+		util::iter_each(nodes, [&](const auto &p){
+			f(gen_node_cptr(&p.second));
+		});
+	}
+	template<class F>
+	void iter_each(F &&f){
+		util::iter_each(nodes, [&](auto &p){
+			f(gen_node_ptr(&p.second));
+		});
+	}
+	template<class F>
+	void for_each(F &&f) const{
+		util::for_each(nodes, [&](const auto &p){
+			f(gen_node_cptr(&p.second));
+		});
+	}
+	template<class F>
+	void for_each(F &&f){
+		util::for_each(nodes, [&](auto &p){
+			f(gen_node_ptr(&p.second));
+		});
 	}
 };
 
