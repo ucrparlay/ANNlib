@@ -26,17 +26,19 @@ namespace ANN{
 template<class Desc>
 class HNSW
 {
+	using cm = custom<typename lookup_custom_tag<Desc>::type>;
+
+	typedef uint32_t nid_t;
 	using point_t = typename Desc::point_t;
 	using pid_t = typename point_t::id_t;
 	using coord_t = typename point_t::coord_t;
 	using dist_t = typename Desc::dist_t; // TODO: elaborate
-	typedef uint32_t nid_t;
 	using conn = util::conn<nid_t>;
-	using cm = custom<typename lookup_custom_tag<Desc>::type>;
-	template<typename T>
-	using seq = typename cm::seq<T>;
 	using search_control = algo::search_control;
 	using prune_control = algo::prune_control;
+
+	template<typename T>
+	using seq = typename cm::seq<T>;
 
 public:
 	struct result_t{
@@ -186,13 +188,10 @@ private:
 	}
 
 public:
-	uint32_t get_height(nid_t u) const
-	{
+	uint32_t get_height(nid_t u) const{
 		return layer_b.get_node(u)->level;
 	}
-
-	uint32_t get_height() const
-	{
+	uint32_t get_height() const{
 		return get_height(entrance[0]);
 	}
 
