@@ -26,9 +26,6 @@ public:
 	void add_node(nid_t);
 	template<class Seq>
 	void add_nodes(Seq&&);
-	// TODO: consider removing the following interfaces
-	size_t get_degree(nid_t) const;
-	size_t get_degree(node_cptr) const;
 	size_t num_nodes() const;
 };
 

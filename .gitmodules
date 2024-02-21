@@ -1,3 +1,7 @@
 [submodule "test/parlaylib"]
 	path = test/parlaylib
 	url = git@github.com:cmuparlay/parlaylib.git
+[submodule "test/CPAM"]
+	path = test/CPAM
+	url = git@github.com:DapperX/CPAM.git
+	branch = generic
