@@ -24,4 +24,8 @@ ifeq (ON, $(HDF5))
 endif
 
 calc_recall: calc_recall.cpp
+
+dyn_test: dyn_test.cpp
+
+calc_recall dyn_test:
 	$(CXX) $< $(CXXFLAGS_BASIC) $(CXXFLAGS_RELEASE) $(CXXFLAGS_HDF5) $(CXXFLAGS_JEMALLOC) -o $@
