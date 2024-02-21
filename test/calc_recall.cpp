@@ -396,10 +396,8 @@ void run_test(commandLine parameter) // intend to be pass-by-value manner
 	t.next("Fetch input vectors");
 
 	fputs("Start building HNSW\n", stderr);
-	HNSW<U> g(
-		ps.begin(), ps.begin()+ps.size(), dim,
-		m_l, m, efc, alpha, batch_base
-	);
+	HNSW<U> g(dim, m_l, m, efc, alpha);
+	g.insert(ps.begin(), ps.begin()+ps.size(), batch_base);
 	t.next("Build index");
 
 	// post-processing

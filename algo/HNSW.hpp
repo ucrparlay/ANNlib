@@ -53,17 +53,18 @@ public:
 		alpha:		parameter of the heuristic (similar to the one in vamana)
 		batch_base: growth rate of the batch size (discarded because of two passes)
 	*/
-	template<typename Iter>
 	HNSW(
-		Iter begin, Iter end,
 		uint32_t dim, float m_l=0.4, 
 		uint32_t m=100, uint32_t efc=50, 
-		float alpha=1.0, float batch_base=2
+		float alpha=1.0
 	);
 	/*
 		Construct from the saved model
 		getter(i) returns the actual data (convertible to type T) of the vector with id i
 	*/
+
+	template<typename Iter>
+	void insert(Iter begin, Iter end, float batch_base=2);
 
 	template<class Seq=seq<result_t>>
 	Seq search(
@@ -106,7 +107,6 @@ private:
 	uint32_t m;
 	uint32_t efc;
 	float alpha;
-	uint32_t n;
 
 	template<typename Iter>
 	void insert_batch_impl(Iter begin, Iter end);
@@ -192,25 +192,28 @@ public:
 	}
 	size_t cnt_degree(uint32_t l) const
 	{
-		auto cnt_each = util::delayed_seq(n, [&](size_t i){
-			return cnt_degree(l, nid_t(i));
-		});
+		auto cnt_each = util::delayed_seq(
+			l==0? layer_b.num_nodes(): layer_u[l].num_nodes(),
+			[&](size_t i){return cnt_degree(l, nid_t(i));}
+		);
 		return cm::reduce(cnt_each);
 	}
 
 	size_t cnt_vertex(uint32_t l) const
 	{
-		auto cnt_each = util::delayed_seq(n, [&](size_t i){
-			return get_height(nid_t(i))<l? 0: 1;
-		});
+		auto cnt_each = util::delayed_seq(
+			l==0? layer_b.num_nodes(): layer_u[l].num_nodes(),
+			[&](size_t i){return get_height(nid_t(i))<l? 0: 1;}
+		);
 		return cm::reduce(cnt_each);
 	}
 
 	size_t get_degree_max(uint32_t l) const
 	{
-		auto cnt_each = util::delayed_seq(n, [&](size_t i){
-			return cnt_degree(l, nid_t(i));
-		});
+		auto cnt_each = util::delayed_seq(
+			l==0? layer_b.num_nodes(): layer_u[l].num_nodes(),
+			[&](size_t i){return cnt_degree(l, nid_t(i));}
+		);
 		return cm::reduce(cnt_each, 0, [](size_t x, size_t y){
 			return std::max(x, y);
 		});
@@ -218,18 +221,24 @@ public:
 };
 
 template<class Desc>
+HNSW<Desc>::HNSW(
+	uint32_t dim_, float m_l_, uint32_t m_, uint32_t efc, float alpha
+) :
+	dim(dim_), m_l(m_l_), m(m_), efc(efc), alpha(alpha)
+{
+}
+
+template<class Desc>
 template<typename Iter>
-HNSW<Desc>::HNSW(Iter begin, Iter end, uint32_t dim_, 
-	float m_l_, uint32_t m_, uint32_t efc, float alpha, float batch_base
-):
-	dim(dim_), m_l(m_l_), m(m_), efc(efc), alpha(alpha), n(std::distance(begin,end))
+void HNSW<Desc>::insert(Iter begin, Iter end, float batch_base)
 {
 	static_assert(std::is_same_v<typename std::iterator_traits<Iter>::value_type, point_t>);
 	static_assert(std::is_base_of_v<
 		std::random_access_iterator_tag, typename std::iterator_traits<Iter>::iterator_category
 	>);
 
-	if(n==0) return; // TODO: remove n
+	const size_t n = std::distance(begin, end);
+	if(n==0) return;
 
 	// std::random_device rd;
 	auto perm = cm::random_permutation(n/*, rd()*/);
@@ -237,23 +246,28 @@ HNSW<Desc>::HNSW(Iter begin, Iter end, uint32_t dim_,
 		return *(begin+perm[i]);
 	});
 
-	const auto level_ep = gen_level();
-	const nid_t ep_init = id_map.insert(rand_seq.begin()->get_id());
-	layer_b.add_node(ep_init, node_fat{level_ep,rand_seq.begin()->get_coord()});
-	if(level_ep>0)
+	size_t cnt_skip = 0;
+	if(layer_b.empty())
 	{
-		layer_u.resize(level_ep+1);
-		for(uint32_t l=level_ep; l>0; --l)
-			layer_u[l].add_node(ep_init, node_lite{});
+		const auto level_ep = gen_level();
+		const nid_t ep_init = id_map.insert(rand_seq.begin()->get_id());
+		layer_b.add_node(ep_init, node_fat{level_ep,rand_seq.begin()->get_coord()});
+		if(level_ep>0)
+		{
+			layer_u.resize(level_ep+1);
+			for(uint32_t l=level_ep; l>0; --l)
+				layer_u[l].add_node(ep_init, node_lite{});
+		}
+		entrance.push_back(ep_init);
+		cnt_skip = 1;
 	}
-	entrance.push_back(ep_init);
 
-	uint32_t batch_begin=0, batch_end=1, size_limit=n*0.02;
+	size_t batch_begin=0, batch_end=cnt_skip, size_limit=std::max<size_t>(n*0.02,20000);
 	float progress = 0.0;
 	while(batch_end<n)
 	{
 		batch_begin = batch_end;
-		batch_end = std::min({n, (uint32_t)std::ceil(batch_begin*batch_base)+1, batch_begin+size_limit});
+		batch_end = std::min({n, (size_t)std::ceil(batch_begin*batch_base)+1, batch_begin+size_limit});
 
 		util::debug_output("Batch insertion: [%u, %u)\n", batch_begin, batch_end);
 		insert_batch_impl(rand_seq.begin()+batch_begin, rand_seq.begin()+batch_end);
