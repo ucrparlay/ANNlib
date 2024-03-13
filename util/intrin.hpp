@@ -90,7 +90,7 @@ template<class C, class R, class F=identity>
 C to(R &&r)
 {
 	static_assert(std::is_convertible_v<R,C>);
-	return r;
+	return C(std::forward<R>(r));
 }
 
 /*
