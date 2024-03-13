@@ -182,7 +182,7 @@ private:
 				auto &deg = degs[cm::worker_id()];
 				deg = op(deg, g.get_edges(p).size());
 			});
-			return cm::reduce(degs, 0, op);
+			return cm::reduce(degs, size_t(0), op);
 		};
 		return l==0? impl(layer_b): impl(layer_u[l]);
 	}
