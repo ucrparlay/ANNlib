@@ -192,7 +192,7 @@ public:
 		return layer_b.get_node(u)->level;
 	}
 	uint32_t get_height() const{
-		return get_height(entrance[0]);
+		return get_height(entrance[0]); // TODO: fix the issue when being empty
 	}
 
 	size_t num_nodes(uint32_t l) const{
@@ -288,22 +288,7 @@ void HNSW<Desc>::insert(Iter begin, Iter end, float batch_base)
 	per_visited.clear();
 	per_eval.clear();
 	per_size_C.clear();
-
-	#if 0
-		for(const auto *pu : node_pool)
-		{
-			fprintf(stderr, "[%u] (%.2f,%.2f)\n", U::get_id(get_node(pu).data), get_node(pu).data[0], get_node(pu).data[1]);
-			for(int32_t l=pu->level; l>=0; --l)
-			{
-				fprintf(stderr, "\tlv. %d:", l);
-				for(const auto *k : pu->neighbors[l])
-					fprintf(stderr, " %u", U::get_id(get_node(k).data));
-				fputs("\n", stderr);
-			}
-		}
-	#endif
 }
-
 
 template<class Desc>
 template<typename Iter>
@@ -474,7 +459,7 @@ void HNSW<Desc>::insert_batch_impl(Iter begin, Iter end)
 	util::debug_output("Updating entrance\n");
 	if(level_max>level_ep)
 	{
-		util::debug_output("Prompt the ep_level to %u\n", level_max);
+		util::debug_output("Promote the ep_level to %u\n", level_max);
 		entrance.clear();
 	}
 

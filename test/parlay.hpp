@@ -34,7 +34,7 @@ public:
 	template<typename T>
 	using seq = parlay::sequence<T>;
 
-	template <typename F>
+	template<typename F>
 	static void parallel_for(
 		size_t start, size_t stop, F f,
 		long granularity=0, bool conservative=false)

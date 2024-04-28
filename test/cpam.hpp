@@ -232,7 +232,6 @@ public:
 private:
 	template <typename Iter, class F>
 	void insert_vertices_batch(Iter begin, Iter end, F &&comb){
-		using entry_t = typename map_entry::entry_t;
 		auto key_less = [&](const auto& l, const auto& r){
 			return map_entry::comp(map_entry::get_key(l), map_entry::get_key(r));
 		};
