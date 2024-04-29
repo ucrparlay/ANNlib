@@ -176,7 +176,8 @@ private:
 	// it is safe to uncomment the following code only if 
 	// pam_map and cpam::diff_encoded_map has been modified to
 	// return a refernce of val_t rather than a value copy from .find()
-	using nodemap = cpam::pam_map<node_entry>;
+	using nodemap = pam_map<node_entry>;
+	// using nodemap = cpam::pam_map<node_entry>;
 	using map_entry = typename nodemap::Entry;
 	/*
 #ifdef USE_PAM_UPPER
