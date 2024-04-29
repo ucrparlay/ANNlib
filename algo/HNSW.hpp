@@ -431,7 +431,10 @@ void HNSW<Desc>::insert_batch_impl(Iter begin, Iter end)
 	{
 		util::debug_output("Looking for neighbors on lev. %d\n", l);
 
-		while(pos_split[j+1]<size_batch && level[pos_split[j+1]]>=l)
+		// nodes indexed within [0, pos_end) have their levels>='l'
+		size_t pos_end;
+		while(pos_end=pos_split[j+1],
+			pos_end<size_batch && level[pos_end]>=l)
 			j++;
 		util::debug_output("j=%lu l=%d\n", j, l);
 
