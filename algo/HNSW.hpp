@@ -378,33 +378,45 @@ void HNSW<Desc>::insert_batch_impl(Iter begin, Iter end)
 		return i==0 || level[i-1]!=level[i];
 	}));
 
+	// with the level info, query the nearest nbhs as entry points for each node
+	cm::parallel_for(0, size_batch, [&](size_t i){
+		eps[i] = search_layer_to((begin+i)->get_coord(), 1, level[i]);
+	});
+	util::debug_output("Finish searching entrances\n");
+
+	// next, add the nodes themselves into the graphs
 	const uint32_t level_ep = layer_b.get_node(entrance[0])->level;
 	const uint32_t level_max = level[0];
-
-	layer_b.add_nodes(util::delayed_seq(size_batch, [&](size_t i){
-		// GUARANTEE: only invoke once
-		return std::pair{nids[i], node_fat{level[i],(begin+i)->get_coord()}};
-	}));
 	if(level_max>level_ep)
 		layer_u.resize(level_max+1);
+
+	auto add_to_upper = [&](uint32_t l, size_t pos_end){
+		util::debug_output(
+			"== insert [%u, %u) to layer[%u]\n", 
+			begin->get_id(), (begin+pos_end)->get_id(), l
+		);
+		layer_u[l].add_nodes(
+			util::delayed_seq(pos_end, [&](size_t i){
+				return std::pair{nids[i], node_lite{}};
+			})
+		);
+	};
 	// note the end of range where level==0 is not yet in `pos_split'
+	// so any level[pos_split[j]] must be valid
 	for(size_t j=1; j<pos_split.size(); ++j)
 	{
 		const uint32_t l_hi = level[pos_split[j-1]];
 		const uint32_t l_lo = level[pos_split[j]];
-		for(uint32_t l=l_hi; l>l_lo; --l) // TODO: why isn't it a problem in CPAM
-		{
-			util::debug_output(
-				"== insert [%u, %u) to layer[%u]\n", 
-				begin->get_id(), (begin+pos_split[j])->get_id(), l
-			);
-			layer_u[l].add_nodes(
-				util::delayed_seq(pos_split[j], [&](size_t i){
-					return std::pair{nids[i], node_lite{}};
-				})
-			);
-		}
+		for(uint32_t l=l_hi; l>l_lo; --l)
+			add_to_upper(l, pos_split[j]);
 	}
+	for(uint32_t l=level[pos_split.back()]; l>0; --l)
+		add_to_upper(l, size_batch);
+
+	layer_b.add_nodes(util::delayed_seq(size_batch, [&](size_t i){
+		// GUARANTEE: begin[*].get_coord is only invoked for assignment once
+		return std::pair{nids[i], node_fat{level[i],(begin+i)->get_coord()}};
+	}));
 
 	pos_split.push_back(size_batch); // complete the range of level 0
 	util::debug_output("results of pos_split: ");
@@ -413,16 +425,7 @@ void HNSW<Desc>::insert_batch_impl(Iter begin, Iter end)
 	util::debug_output("\n");
 
 	// below we (re)generate edges incident to nodes in the current batch
-	// in the top-to-bottom manner
-
-	// first, query the nearest point as the entry point for each node
-	cm::parallel_for(0, size_batch, [&](size_t i){
-		nid_t u = nids[i];
-		eps[i] = search_layer_to(layer_b.get_node(u)->get_coord(), 1, level[i]);
-	});
-	util::debug_output("Finish searching entrances\n");
-
-	// then we process them layer by layer (`l': current layer)
+	// we process them layer by layer (`l': current layer) in a top-to-bottom manner
 	size_t j = 0;
 	for(int32_t l=std::min(level_ep,level_max); l>=0; --l) // TODO: fix the type
 	{
