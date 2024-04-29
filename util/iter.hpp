@@ -80,6 +80,7 @@ protected:
 
 } // namespace detail
 
+// TODO: use the deducing this in C++23 to prevent CRTP
 template<class D, typename P, typename B>
 class enable_rand_iter :
 	public detail::rand_iter_base<P>
@@ -97,9 +98,6 @@ protected:
 		return baseinfo;
 	}
 
-	enable_rand_iter(base &&b, const B &baseinfo) :
-		base(std::move(b)), baseinfo(baseinfo){
-	}
 	enable_rand_iter(const P &pos, const B &baseinfo) :
 		base(pos), baseinfo(baseinfo){
 	}
@@ -127,19 +125,19 @@ public:
 		return static_cast<D&>(*this);
 	}
 	D& operator++(){ // ++iter
-		static_assert(
-			std::is_convertible_v<D*,enable_rand_iter*> &&
-			sizeof(enable_rand_iter)==sizeof(D)
-		);
+		static_assert(std::is_convertible_v<D*,enable_rand_iter*>);
 		base::operator++();
 		return static_cast<D&>(*this);
 	}
 	D operator++(int _){ // iter++
-		static_assert(std::is_constructible_v<D,enable_rand_iter&&>);
-		return enable_rand_iter(base::operator++(_), baseinfo);
+		D ret = static_cast<const D&>(*this);
+		ret.base::operator++();
+		return ret;
 	}
 	D operator+(difference_type offset) const{
-		return enable_rand_iter(base::operator+(offset), baseinfo);
+		D ret = static_cast<const D&>(*this);
+		ret.base::operator+=(offset);
+		return ret;
 	}
 
 	D& operator-=(difference_type offset){
@@ -151,10 +149,14 @@ public:
 		return static_cast<D&>(*this);
 	}
 	D operator--(int _){
-		return enable_rand_iter(base::operator--(_), baseinfo);
+		D ret = static_cast<const D&>(*this);
+		ret.base::operator--();
+		return ret;
 	}
 	D operator-(difference_type offset) const{
-		return enable_rand_iter(base::operator-(offset), baseinfo);
+		D ret = static_cast<const D&>(*this);
+		ret.base::operator-=(offset);
+		return ret;
 	}
 
 	difference_type operator-(const enable_rand_iter &rhs) const{
@@ -187,9 +189,6 @@ protected:
 		return {};
 	}
 
-	enable_rand_iter(base &&b) :
-		base(std::move(b)){
-	}
 	enable_rand_iter(const P &pos, empty={}) :
 		base(pos){
 	}
@@ -209,18 +208,18 @@ public:
 		return static_cast<D&>(base::operator+=(offset));
 	}
 	D& operator++(){ // ++iter
-		static_assert(
-			std::is_convertible_v<D*,enable_rand_iter*> &&
-			sizeof(enable_rand_iter)==sizeof(D)
-		);
+		static_assert(std::is_convertible_v<D*,enable_rand_iter*>);
 		return static_cast<D&>(base::operator++());
 	}
 	D operator++(int _){ // iter++
-		static_assert(std::is_constructible_v<D,enable_rand_iter&&>);
-		return enable_rand_iter(base::operator++(_));
+		D ret = static_cast<const D&>(*this);
+		ret.base::operator++();
+		return ret;
 	}
 	D operator+(difference_type offset) const{
-		return enable_rand_iter(base::operator+(offset));
+		D ret = static_cast<const D&>(*this);
+		ret.base::operator+=(offset);
+		return ret;
 	}
 
 	D& operator-=(difference_type offset){
@@ -230,10 +229,14 @@ public:
 		return static_cast<D&>(base::operator--());
 	}
 	D operator--(int _){
-		return enable_rand_iter(base::operator--(_));
+		D ret = static_cast<const D&>(*this);
+		ret.base::operator--();
+		return ret;
 	}
 	D operator-(difference_type offset) const{
-		return enable_rand_iter(base::operator-(offset));
+		D ret = static_cast<const D&>(*this);
+		ret.base::operator-=(offset);
+		return ret;
 	}
 
 	difference_type operator-(const enable_rand_iter &rhs) const{
