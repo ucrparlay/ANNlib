@@ -60,6 +60,9 @@ class identity
 	}
 };
 
+class empty{
+};
+
 template<typename>
 struct dummy{
 };
@@ -71,6 +74,62 @@ struct is_dummy :
 
 template<template<typename> class TT>
 inline constexpr bool is_dummy_v = is_dummy<TT>::value;
+
+template<typename T>
+class materialized_ptr{
+	T value;
+public:
+	typedef T value_type;
+	typedef T* pointer;
+	typedef T& reference;
+
+	pointer operator->() const& noexcept{
+		return const_cast<pointer>(&value);
+	}
+	pointer operator->() && = delete;
+	reference operator*() const& noexcept{
+		return const_cast<reference>(value);
+	}
+	value_type operator*() && noexcept{
+		return std::move(const_cast<reference>(value));
+	}
+
+	// TODO: use `requires` instead in C++20
+	template<typename=std::enable_if_t<std::is_default_constructible_v<T>>>
+	materialized_ptr() : value(){
+	}
+	template<typename U>
+	materialized_ptr(U &&value) :
+		value(std::forward<U>(value)){
+	}
+	materialized_ptr(materialized_ptr&&) = default;
+	materialized_ptr(const materialized_ptr&) = delete;
+	materialized_ptr& operator=(materialized_ptr&&) = default;
+	materialized_ptr& operator=(const materialized_ptr&) = delete;
+};
+
+template<typename T>
+class materialized_ptr<T&>{
+	std::reference_wrapper<T> ref;
+public:
+	typedef T value_type;
+	typedef T* pointer;
+	typedef T& reference;
+
+	pointer operator->() const noexcept{
+		return &ref.get();
+	}
+	reference operator*() const noexcept{
+		return ref.get();
+	}
+
+	// TODO: use `requires` instead in C++20
+	materialized_ptr(T &ref) : ref(ref){}
+	materialized_ptr(materialized_ptr&&) = default;
+	materialized_ptr(const materialized_ptr&) = delete;
+	materialized_ptr& operator=(materialized_ptr&&) = default;
+	materialized_ptr& operator=(const materialized_ptr&) = delete;
+};
 
 template<class R, typename=void, typename ...Ts>
 struct is_direct_list_initializable_impl : std::false_type{

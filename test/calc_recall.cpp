@@ -14,7 +14,7 @@
 #include "dist.hpp"
 #include "parlay.hpp"
 #include "benchUtils.h"
-#include "aspen.hpp"
+#include "cpam.hpp"
 using ANN::HNSW;
 
 parlay::sequence<size_t> per_visited;
@@ -54,7 +54,7 @@ public:
 };
 
 template<class DescLegacy>
-struct desc{
+struct desc_default{
 	using point_t = point<typename DescLegacy::type_elem>;
 	using coord_t = typename point_t::coord_t;
 	using dist_t = float;
@@ -62,27 +62,26 @@ struct desc{
 		return DescLegacy::distance(cu, cv, dim);
 	}
 
-	template<typename Nid, class Ext>
-	using graph_t = ANN::graph::adj_seq<Nid,Ext>;
+	template<typename Nid, class Ext, class Edge=Nid>
+	using graph_t = ANN::graph::adj_seq<Nid,Ext,Edge>;
 
-	template<typename Nid, class Ext>
-	using graph_aux = ANN::graph::adj_map<Nid,Ext>;
+	template<typename Nid, class Ext, class Edge=Nid>
+	using graph_aux = ANN::graph::adj_map<Nid,Ext,Edge>;
 };
 
 template<class DescLegacy>
-struct desc_aspen : desc<DescLegacy>{
-	struct empty_weight{};
+struct desc_cpam : desc_default<DescLegacy>{
+	template<typename Nid, class Ext, class Edge=Nid>
+	using graph_t = graph_cpam<Nid,Ext,Edge>;
 
-	template<typename Nid, class Ext>
-	using graph_t = graph_aspen<aspen::versioned_graph<
-		aspen::symmetric_graph<empty_weight,Ext>
-	>>;
-
-	template<typename Nid, class Ext>
-	using graph_aux = graph_aspen<aspen::versioned_graph<
-		aspen::symmetric_graph<empty_weight,Ext>
-	>>;
+	template<typename Nid, class Ext, class Edge=Nid>
+	using graph_aux = graph_cpam<Nid,Ext,Edge>;
 };
+
+// Switch the graph structure that is used
+template<class DescLegacy>
+// using desc = desc_default<DescLegacy>;
+using desc = desc_cpam<DescLegacy>;
 
 // Visit all the vectors in the given 2D array of points
 // This triggers the page fetching if the vectors are mmap-ed
@@ -197,7 +196,7 @@ double output_recall(HNSW<U> &g, parlay::internal::timer &t, uint32_t ef, uint32
 			uint32_t cnt_shot = 0;
 			for(uint32_t j=0; j<k; ++j)
 				if(std::find_if(res[i].begin(),res[i].end(),[&](const std::pair<float,uint32_t> &p){
-					return p.second==gt[i][j];}) != res[i].end())
+					return p.second==gt[i][j];}) != res[i].end()) // TODO: more checks
 				{
 					cnt_shot++;
 				}
@@ -397,10 +396,8 @@ void run_test(commandLine parameter) // intend to be pass-by-value manner
 	t.next("Fetch input vectors");
 
 	fputs("Start building HNSW\n", stderr);
-	HNSW<U> g(
-		ps.begin(), ps.begin()+ps.size(), dim,
-		m_l, m, efc, alpha, batch_base
-	);
+	HNSW<U> g(dim, m_l, m, efc, alpha);
+	g.insert(ps.begin(), ps.begin()+ps.size(), batch_base);
 	t.next("Build index");
 
 	// post-processing
@@ -431,10 +428,10 @@ void run_test(commandLine parameter) // intend to be pass-by-value manner
 	for(uint32_t i=0; i<=height; ++i)
 	{
 		const uint32_t level = height-i;
-		size_t cnt_vertex = g.cnt_vertex(level);
-		size_t cnt_degree = g.cnt_degree(level);
-		size_t degree_max = g.get_degree_max(level);
-		printf("#%2u: %14lu %16lu %11lu\n", level, cnt_vertex, cnt_degree, degree_max);
+		size_t num_nodes = g.num_nodes(level);
+		size_t num_edges = g.num_edges(level);
+		size_t max_deg = g.max_deg(level);
+		printf("#%2u: %14lu %16lu %11lu\n", level, num_nodes, num_edges, max_deg);
 	}
 	t.next("Count vertices and degrees");
 
@@ -466,25 +463,22 @@ int main(int argc, char **argv)
 	auto run_test_helper = [&](auto type){ // emulate a generic lambda in C++20
 		using T = decltype(type);
 		if(!strcmp(dist_func,"L2"))
-			run_test<desc_aspen<descr_l2<T>>>(parameter);
-		/*
+			run_test<desc<descr_l2<T>>>(parameter);/*
 		else if(!strcmp(dist_func,"angular"))
 			run_test<desc<descr_ang<T>>>(parameter);
 		else if(!strcmp(dist_func,"ndot"))
-			run_test<desc<descr_ndot<T>>>(parameter);
-		*/
+			run_test<desc<descr_ndot<T>>>(parameter);*/
 		else throw std::invalid_argument("Unsupported distance type");
 	};
 
 	const char* type = parameter.getOptionValue("-type");
 	if(!strcmp(type,"uint8"))
-		run_test_helper(uint8_t{});
-	/*
+		run_test_helper(uint8_t{});/*
 	else if(!strcmp(type,"int8"))
 		run_test_helper(int8_t{});
 	else if(!strcmp(type,"float"))
-		run_test_helper(float{});
-	*/
+		run_test_helper(float{});*/
+	
 	else throw std::invalid_argument("Unsupported element type");
 	return 0;
 }
