@@ -431,7 +431,7 @@ private:
 			ext(std::move(ext))
 		{}
 		vinfo_trivial_ext(edgelist edges) :
-			vinfo_edges(std::move(edges))
+			vinfo_edges(std::move(edges)), ext()
 		{}
 		vinfo_trivial_ext(ext_t ext, edgelist edges) : 
 			vinfo_edges(std::move(edges)), ext(std::move(ext))
