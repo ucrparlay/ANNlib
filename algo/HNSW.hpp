@@ -19,7 +19,7 @@
 #include "map/direct.hpp"
 #include "util/debug.hpp"
 #include "util/helper.hpp"
-#include "custom.hpp"
+#include "custom/custom.hpp"
 
 namespace ANN{
 
@@ -404,7 +404,7 @@ void HNSW<Desc>::insert_batch_impl(Iter begin, Iter end)
 
 			auto &eps_u = eps[i];
 			auto search_layer = [&](const auto &g) -> decltype(auto){
-				search_control ctrl; // TODO: use designated intializers in C++20
+				search_control ctrl; // TODO: use designated initializers in C++20
 				ctrl.log_per_stat = i;
 				return algo::beamSearch(gen_f_nbhs(g), gen_f_dist(u), eps_u, efc, ctrl);
 			};

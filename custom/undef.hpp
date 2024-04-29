@@ -1,5 +1,5 @@
-#ifndef _ANN_CUSTOM_HPP
-#define _ANN_CUSTOM_HPP
+#ifndef _ANN_CUSTOM_UNDEF_HPP
+#define _ANN_CUSTOM_UNDEF_HPP
 
 #include <cstdint>
 #include <vector>
@@ -7,31 +7,17 @@
 #include <memory>
 #include <execution>
 #include <functional>
-#include <type_traits>
+#include "custom.hpp"
 #include "util/seq.hpp"
 
-namespace ANN{
-namespace external{
+namespace ANN::external{
 
 class custom_tag_undef;
 
-auto def_custom_tag();
-
-template<typename T, typename=void>
+template<typename, typename>
 struct lookup_custom_tag_impl{
 	using type = custom_tag_undef;
 };
-
-template<typename T>
-struct lookup_custom_tag_impl<T,std::void_t<decltype(def_custom_tag(),bool{})>>{
-	using type = decltype(def_custom_tag());
-};
-
-template<typename T=void>
-using lookup_custom_tag = lookup_custom_tag_impl<T>;
-
-template<class Tag>
-class custom;
 
 template<>
 class custom<custom_tag_undef>
@@ -62,9 +48,4 @@ public:
 
 } // namespace external
 
-using external::custom;
-using external::lookup_custom_tag;
-
-} // namespace ANN
-
-#endif // _ANN_CUSTOM_HPP
+#endif // _ANN_CUSTOM_UNDEF_HPP

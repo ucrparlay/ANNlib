@@ -7,8 +7,9 @@
 #include <utility>
 #include <type_traits>
 #include "graph.hpp"
-#include "custom.hpp"
+#include "custom/custom.hpp"
 #include "util/util.hpp"
+#include "util/seq.hpp"
 #include "util/debug.hpp"
 using ANN::util::debug_output;
 
@@ -100,6 +101,7 @@ protected:
 	Seq pop_edges_impl(node_cptr p, util::dummy<Seq>){
 		assert(0);
 		edgelist &nbhs = p.ptr->neighbors;
+		// TODO: use `Seq(std::from_range, nbhs)` in C++23
 		Seq edges(
 			std::make_move_iterator(nbhs.begin()),
 			std::make_move_iterator(nbhs.end())
@@ -153,6 +155,7 @@ public:
 	}
 	template<class Iter>
 	void set_edges(Iter begin, Iter end){
+		// TODO: forward to `set_edges(Seq&&)` using `subrange` in C++20
 		const auto n = std::distance(begin, end);
 		cm::parallel_for(0, n, [&](size_t i){
 			auto &&[nid,es] = *(begin+i);
@@ -163,6 +166,7 @@ public:
 	void set_edges(Seq&& ps){
 		if constexpr(std::is_rvalue_reference_v<Seq&&>)
 		{
+			// TODO: use `util::for_each`
 			set_edges(
 				std::make_move_iterator(ps.begin()),
 				std::make_move_iterator(ps.end())
@@ -229,6 +233,8 @@ template<
 	template<typename> class TSeqE=detail::seq_default>
 class adj_seq : public adj_base<Nid,Ext,TMapV,TSeqE>
 {
+	static_assert(std::is_default_constructible_v<Ext>);
+
 	using _base = adj_base<Nid,Ext,TMapV,TSeqE>;
 
 	using typename _base::cm;
@@ -265,6 +271,7 @@ public:
 	}
 	template<class Iter>
 	void add_nodes(Iter begin, Iter end){
+		// TODO: forward to `add_nodes(Seq&&)` using `subrange` in C++20
 		const auto n = std::distance(begin, end);
 		auto nids = util::delayed_seq(n, [&](size_t i){
 			return (nid_t)std::get<0>(*(begin+i));
@@ -282,6 +289,7 @@ public:
 	void add_nodes(Seq&& ns){
 		if constexpr(std::is_rvalue_reference_v<Seq&&>)
 		{
+			// TODO: use `util::for_each`
 			add_nodes(
 				std::make_move_iterator(ns.begin()),
 				std::make_move_iterator(ns.end())
@@ -322,12 +330,14 @@ public:
 	}
 	template<class Iter>
 	void add_nodes(Iter begin, Iter end){
+		// TODO: forward to `add_nodes(Seq&&)` using `subrange` in C++20
 		nodes.insert(begin, end);
 	}
 	template<class Seq>
 	void add_nodes(Seq&& ns){
 		if constexpr(std::is_rvalue_reference_v<Seq&&>)
 		{
+			// TODO: use `util::for_each`
 			add_nodes(
 				std::make_move_iterator(ns.begin()),
 				std::make_move_iterator(ns.end())
