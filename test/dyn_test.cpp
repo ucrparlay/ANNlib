@@ -2,16 +2,22 @@
 #include <cstdlib>
 #include <cstdint>
 #include <algorithm>
+#include <numeric>
+#include <random>
 #include <string>
 #include <sstream>
+#include <iterator>
 #include <vector>
 #include <queue>
 #include <map>
+#include <unordered_set>
+#include <unordered_map>
 #include <chrono>
 #include <stdexcept>
 #include "parse_points.hpp"
 #include "graph/adj.hpp"
 #include "algo/HNSW.hpp"
+#include "util/intrin.hpp"
 #include "dist.hpp"
 #include "parlay.hpp"
 #include "benchUtils.h"
@@ -109,6 +115,114 @@ void print_stat(const G &g)
 		);
 	}
 	
+}
+
+// assume the snapshots are only of increasing insertions
+template<class R>
+void print_stat_snapshots(const R &snapshots)
+{
+	const auto &fin = snapshots.back();
+	std::vector<std::unordered_set<uint64_t>> cnts_vtx(fin.get_height()+1);
+	std::vector<std::unordered_map<uint64_t,size_t>> cnts_edge(fin.get_height()+1);
+	// count the vertices and the edges
+	for(const auto &g : snapshots)
+	{
+		auto sum_edges = [](const auto &m){
+			return std::transform_reduce(
+				m.begin(), m.end(),
+				size_t(0),
+				std::plus<size_t>{},
+				// [](uint64_t eid){return size_t(eid&0xffff);}
+				[](std::pair<uint64_t,size_t> p){return p.second;}
+			);
+		};
+
+		const uint32_t height = g.get_height();
+		printf("Highest level: %u\n", height);
+		puts("level     #vertices      edges    avg. deg   ref#vtx   ref#edge");		
+		for(uint32_t i=0; i<=height; ++i)
+		{
+			const uint32_t l = height-i;
+			size_t cnt_vertex = g.num_nodes(l);
+			size_t cnt_degree = g.num_edges(l);
+			auto refs = g.collect_refs(l);
+
+			// TODO: use std::transform_view in C++20
+			for(auto [key,val] : refs)
+			{
+				cnts_vtx[l].insert(key);
+				uint64_t ptr_el = val>>16;
+				size_t size_el = val&0xffff;
+				auto &old_size = cnts_edge[l][ptr_el];
+				if(old_size<size_el)
+					old_size = size_el;
+			}
+
+			size_t ref_vtx = cnts_vtx[l].size();
+			size_t ref_edge = sum_edges(cnts_edge[l]);
+			printf("#%2u: %14lu %10lu %10.2f %10lu %10lu\n", 
+				l, cnt_vertex, cnt_degree, float(cnt_degree)/cnt_vertex,
+				ref_vtx, ref_edge
+			);
+		}
+	}
+
+	// sample 100 vertices and observe the historical changes of their edge lists
+	std::mt19937 gen(1206);
+	std::uniform_int_distribution<uint32_t> distrib(0, fin.num_nodes(0));
+	std::vector<uint32_t> samples(100);
+	for(uint32_t &sample : samples)
+	{
+		sample = distrib(gen);
+		printf("%u ", sample);
+	}
+	putchar('\n');
+
+	for(size_t i=0; i<snapshots.size(); ++i)
+	{
+		const auto &s = snapshots[i];
+		for(uint32_t sample : samples)
+		{
+			if(sample>=s.num_nodes(0))
+			{
+				// printf("* ");
+				printf("0 ");
+				continue;
+			}
+			if(i==0 || sample>=snapshots[i-1].num_nodes(0))
+			{
+				// printf("+%lu,-0 ", s.get_nbhs(sample).size());
+				printf("%lu ", s.get_nbhs(sample).size());
+				continue;
+			}
+
+			auto calc_diff = [](auto agent_last, auto agent_curr){
+				using edge_t = typename decltype(agent_last)::value_type;
+				auto last = ANN::util::to<parlay::sequence<edge_t>>(agent_last);
+				auto curr = ANN::util::to<parlay::sequence<edge_t>>(agent_curr);
+				std::sort(last.begin(), last.end());
+				std::sort(curr.begin(), curr.end());
+				parlay::sequence<edge_t> comm;
+				std::set_intersection(
+					last.begin(), last.end(),
+					curr.begin(), curr.end(),
+					std::inserter(comm, comm.end())
+				);
+				return std::make_pair(
+					curr.size()-comm.size(),
+					last.size()-comm.size()
+				);
+			};
+
+			auto diff = calc_diff(
+				snapshots[i-1].get_nbhs(sample),
+				s.get_nbhs(sample)
+			);
+			// printf("+%lu,-%lu ", diff.first, diff.second);
+			printf("%lu ", diff.first);
+		}
+		putchar('\n');
+	}
 }
 
 template<class G, class Seq>
@@ -290,7 +404,7 @@ void run_test(commandLine parameter) // intend to be pass-by-value manner
 		snapshots.push_back(g);
 
 		puts("Collect statistics");
-		print_stat(g);
+		// print_stat(g);
 
 		puts("Search for neighbors");
 		auto res = find_nbhs(g, q, k, ef);
@@ -304,6 +418,8 @@ void run_test(commandLine parameter) // intend to be pass-by-value manner
 
 		puts("---");
 	}
+
+	print_stat_snapshots(snapshots);
 }
 
 int main(int argc, char **argv)

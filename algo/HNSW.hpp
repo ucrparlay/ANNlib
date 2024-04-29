@@ -266,6 +266,33 @@ public:
 			return std::max(x, y);
 		});
 	}
+
+	auto collect_refs(uint32_t l) const{
+		auto impl = [](const auto &g){
+			using Map = std::unordered_map<uint64_t,uint64_t>;
+			seq<Map> ref_cnt(cm::num_workers());
+			g.for_each_raw([&](const auto &e, auto *ptr, auto r){
+				(void)r;
+				auto &counter = ref_cnt[cm::worker_id()];
+				// uint64_t id = (uintptr_t(ptr)<<32) | std::get<0>(e);
+				uint64_t id = uintptr_t(ptr);
+				const auto &[key,val] = e;
+				const auto *ptr_el = val.get_edges_raw().data();
+				// uint64_t id = uintptr_t(ptr_el);
+				const auto size_el = val.get_edges().size();
+				counter[id] = (uintptr_t(ptr_el)<<16) | size_el;
+			});
+			Map all_cnts;
+			for(auto &counter : ref_cnt)
+				all_cnts.merge(std::move(counter));
+			return all_cnts;
+		};
+		return l==0? impl(layer_b): impl(layer_u[l]);
+	}
+
+	decltype(auto) get_nbhs(nid_t u) const{
+		return gen_f_nbhs(layer_b)(u);
+	}
 };
 
 template<class Desc>

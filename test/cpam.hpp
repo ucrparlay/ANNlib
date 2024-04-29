@@ -715,6 +715,13 @@ public:
 		};
 		nodemap::foreach_index(nodes, g);
 	}
+	template<class F>
+	void for_each_raw(F &&f) const{
+		auto g = [&](auto &&...args){
+			f(std::forward<decltype(args)>(args)...);
+		};
+		nodemap::foreach_raw(nodes, g);
+	}
 };
 
 #endif // _ANN_TEST_ASPEN_HPP
