@@ -96,7 +96,6 @@ void visit_point(const T &array, size_t dim0, size_t dim1)
 template<class G>
 void print_stat(const G &g)
 {
-	
 	const uint32_t height = g.get_height();
 	printf("Highest level: %u\n", height);
 	puts("level     #vertices         edges  avg. deg");
@@ -272,6 +271,7 @@ void run_test(commandLine parameter) // intend to be pass-by-value manner
 	t.next("Prefetch vectors");
 
 	HNSW<U> g(dim, m_l, m, efc, alpha);
+	std::vector<HNSW<U>> snapshots;
 	puts("Initialize HNSW");
 
 	for(size_t size_last=0, size_curr=size_init;
@@ -286,6 +286,8 @@ void run_test(commandLine parameter) // intend to be pass-by-value manner
 		auto ins_end = ps.begin()+size_curr;
 		g.insert(ins_begin, ins_end, batch_base);
 		t.next("Finish insertion");
+
+		snapshots.push_back(g);
 
 		puts("Collect statistics");
 		print_stat(g);
