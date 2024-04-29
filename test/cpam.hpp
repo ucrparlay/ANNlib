@@ -3,7 +3,7 @@
 
 #include <cstdint>
 #include <tuple>
-#include <unordered_map>
+#include <unordered_set>
 #include <memory>
 #include <functional>
 #include <utility>
@@ -294,13 +294,85 @@ private:
 		{}
 	};
 
+
+	// TODO: inherit from view in C++20
+	
+	class const_edge_agent{
+		edgelist el;
+
+		const_edge_agent() = default;
+		const_edge_agent(const edgelist &other) : 
+			el(other){
+		}
+		const_edge_agent(edgelist &&other) :
+			el(std::move(other)){
+		}
+
+		edgelist& get_ref() &{
+			return el;
+		}
+		edgelist&& get_ref() &&{
+			return std::move(el);
+		}
+		const edgelist& get_cref() const{
+			return el;
+		}
+		friend graph_cpam;
+	public:
+		typedef typename edgelist::value_type value_type;
+
+		decltype(auto) operator[](size_t i) const{
+			return get_cref()[i];
+		}
+		auto begin() const{
+			return get_cref().begin();
+		}
+		auto end() const{
+			return get_cref().end();
+		}
+		auto size() const{
+			return get_cref().size();
+		}
+	};
+	struct edge_agent : const_edge_agent{
+		using const_edge_agent::const_edge_agent;
+
+		template<class R>
+		edge_agent& operator=(R &&r){
+			// std::sort(r.begin(), r.end());
+			edgelist &es = this->get_ref();
+			// TODO: handle the case of deletion
+			thread_local std::unordered_set<Edge> curr;
+			curr.clear();
+			for(const Edge &u : es)
+				curr.insert(u);
+
+			size_t len_r = 0;
+			for(const Edge &c : r)
+				if(curr.find(c)==curr.end())
+					len_r++;
+
+			if(len_r+es.size()<=es.capacity())
+			{
+				for(const Edge &c : r)
+					if(curr.find(c)==curr.end())
+						es.push_back(c);
+			}
+			else es = ANN::util::to<edgelist>(std::forward<R>(r));
+
+			return *this;
+		}
+	};
+
 	class vinfo_edges{
 	public:
-		using raw_t = shared_wrapper<edgelist>;
+		using raw_t = edgelist;
 
 		const edgelist& get_edges() const{
-			static const edgelist noedge;
-			return edges? *edges: noedge;
+			return edges;
+		}
+		edgelist& get_edges(){
+			return edges;
 		}
 		const raw_t& get_edges_raw() const&{
 			return edges;
@@ -505,10 +577,6 @@ private:
 		nodes.insert(entry_t(id, std::move(e)));
 	}
 
-	const edgelist& get_edges_impl(node_cptr p, ANN::util::dummy<edgelist>) const{
-		return p.content->get_edges();
-	}
-
 	template<class T>
 	node_ptr add_node_impl(nid_t u, T &&ext){
 		insert_vertex_inplace(u, vinfo(std::move(ext)));
@@ -536,13 +604,18 @@ public:
 		return {*nodes.find(u)};
 	}
 
-	template<class Range=edgelist>
-	decltype(auto) get_edges(node_cptr p) const{
-		return get_edges_impl(p, ANN::util::dummy<Range>{}); 
+	// TODO: simplify the code
+	const_edge_agent get_edges(node_cptr p) const{
+		return {p.content->get_edges()};
 	}
-	template<class Range=edgelist>
 	decltype(auto) get_edges(nid_t u) const{
-		return get_edges<Range>(get_node(u));
+		return get_edges(get_node(u));
+	}
+	edge_agent get_edges(node_ptr p){
+		return {p.content->get_edges()};
+	}
+	decltype(auto) get_edges(nid_t u){
+		return get_edges(get_node(u));
 	}
 
 	template<class Iter>
@@ -550,8 +623,17 @@ public:
 		using entry_t = typename map_entry::entry_t;
 		auto n = std::distance(begin, end);
 		auto vs_delayed = ANN::util::delayed_seq(n, [&](size_t i){
-			auto &&[u,es] = *(begin+i);
-			return entry_t(u, vinfo(std::forward<decltype(es)>(es)));
+			auto &&[u,ea] = *(begin+i);
+			// return entry_t(u, vinfo(std::forward<decltype(es)>(es)));
+			using ea_t = std::remove_cv_t<std::remove_reference_t<decltype(ea)>>;
+			if constexpr(std::is_base_of_v<const_edge_agent,ea_t>)
+				return entry_t(u, vinfo(
+					std::forward<decltype(ea)>(ea).get_ref()
+				));
+			else // a range type
+				return entry_t(u, vinfo(
+					ANN::util::to<edgelist>(std::forward<decltype(ea)>(ea))
+				));
 		});
 		using vs_t = typename cm::seq<entry_t>;
 		vs_t vs(vs_delayed.begin(), vs_delayed.end());

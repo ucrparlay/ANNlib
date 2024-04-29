@@ -8,6 +8,7 @@
 #include <numeric>
 #include <random>
 #include <memory>
+#include <functional>
 #include <fstream>
 #include <string>
 #include <unordered_map>
@@ -20,6 +21,33 @@
 #include "util/debug.hpp"
 #include "util/helper.hpp"
 #include "custom/custom.hpp"
+
+namespace ANN::HNSW_details{
+
+template<typename Nid>
+struct edge : util::conn<Nid>{
+	constexpr bool operator<(const edge &rhs) const{
+		return this->u<rhs.u;
+	}
+	constexpr bool operator>(const edge &rhs) const{
+		return this->u>rhs.u;
+	}
+	constexpr bool operator==(const edge &rhs) const{
+		return this->u==rhs.u;
+	}
+	constexpr bool operator!=(const edge &rhs) const{
+		return this->u!=rhs.u;
+	}
+};
+
+} // namespace ANN::HNSW_details
+
+template<typename Nid>
+struct std::hash<ANN::HNSW_details::edge<Nid>>{
+	size_t operator()(const ANN::HNSW_details::edge<Nid> &e) const noexcept{
+		return std::hash<decltype(e.u)>{}(e.u);
+	}
+};
 
 namespace ANN{
 
@@ -34,6 +62,7 @@ class HNSW
 	using coord_t = typename point_t::coord_t;
 	using dist_t = typename Desc::dist_t; // TODO: elaborate
 	using conn = util::conn<nid_t>;
+	using edge = HNSW_details::edge<nid_t>;
 	using search_control = algo::search_control;
 	using prune_control = algo::prune_control;
 
@@ -74,6 +103,19 @@ public:
 	) const;
 
 private:
+	static seq<edge>&& edge_cast(seq<conn> &&cs){
+		return reinterpret_cast<seq<edge>&&>(std::move(cs));
+	}
+	static const seq<edge>& edge_cast(const seq<conn> &cs){
+		return reinterpret_cast<const seq<edge>&>(cs);
+	}
+	static seq<conn>&& conn_cast(seq<edge> &&es){
+		return reinterpret_cast<seq<conn>&&>(std::move(es));
+	}
+	static const seq<conn>& conn_cast(const seq<edge> &es){
+		return reinterpret_cast<const seq<conn>&>(es);
+	}
+
 	struct node_lite{
 		coord_t& get_coord(); // not in use
 		const coord_t& get_coord() const; // not in use
@@ -91,8 +133,8 @@ private:
 		}
 	};
 
-	using graph_fat = typename Desc::graph_t<nid_t,node_fat,conn>;
-	using graph_lite = typename Desc::graph_aux<nid_t,node_lite,conn>;
+	using graph_fat = typename Desc::graph_t<nid_t,node_fat,edge>;
+	using graph_lite = typename Desc::graph_aux<nid_t,node_lite,edge>;
 
 	// the bottom layer 0 is stored in `layer_b` with all needed data (level, coordinate, etc)
 	// the upper layers 1..lev_ep are stored in `layer_u[]` 
@@ -167,10 +209,20 @@ private:
 		return [&](nid_t u) -> decltype(auto){
 			// TODO: use std::views::transform in C++20 / util::tranformed_view
 			// TODO: define the return type as a view, and use auto to receive it
-			const auto &edges = g.get_edges(u);
-			return util::delayed_seq(edges.size(), [&](size_t i){
-				return edges[i].u;
-			});
+			if constexpr(std::is_reference_v<decltype(g.get_edges(u))>)
+			{
+				const auto &edges = g.get_edges(u);
+				return util::delayed_seq(edges.size(), [&](size_t i){
+					return edges[i].u;
+				});
+			}
+			else
+			{
+				auto edges = g.get_edges(u);
+				return util::delayed_seq(edges.size(), [=](size_t i){
+					return edges[i].u;
+				});
+			}	
 		};
 	}
 
@@ -386,11 +438,10 @@ void HNSW<Desc>::insert_batch_impl(Iter begin, Iter end)
 			else
 				layer_u[l].set_edges(std::forward<decltype(args)>(args)...);
 		};
-
-		// nodes indexed within [0, pos_split[j+1]) have their levels>='l'
-		seq<seq<std::pair<nid_t,conn>>> edge_added(pos_split[j+1]);
-		seq<std::pair<nid_t,seq<conn>>> nbh_forward(pos_split[j+1]);
-		cm::parallel_for(0, pos_split[j+1], [&](size_t i){
+		// add adges from the new points
+		seq<seq<std::pair<nid_t,edge>>> edge_added(pos_end);
+		seq<std::pair<nid_t,seq<edge>>> nbh_forward(pos_end);
+		cm::parallel_for(0, pos_end, [&](size_t i){
 			const nid_t u = nids[i];
 
 			auto &eps_u = eps[i];
@@ -415,44 +466,53 @@ void HNSW<Desc>::insert_batch_impl(Iter begin, Iter end)
 					gen_f_nbhs(g), gen_f_dist(u), ctrl
 				);
 			};
-			seq<conn> edge_u = l==0? prune(layer_b): prune(layer_u[l]);
+			seq<conn> conn_u = l==0? prune(layer_b): prune(layer_u[l]);
 			// record the edge for the backward insertion later
 			auto &edge_cur = edge_added[i];
 			edge_cur.clear();
-			edge_cur.reserve(edge_u.size());
-			for(const auto &[d,v] : edge_u)
-				edge_cur.emplace_back(v, conn{d,u});
+			edge_cur.reserve(conn_u.size());
+			for(const auto &[d,v] : conn_u)
+				edge_cur.emplace_back(v, edge{d,u});
 
 			// store for batch insertion
-			nbh_forward[i] = {u, std::move(edge_u)};
+			nbh_forward[i] = {u, edge_cast(std::move(conn_u))};
 		});
 		util::debug_output("Adding forward edges\n");
 		set_edges(std::move(nbh_forward));
 
 		// now we add edges in the other direction
-		auto edge_added_flatten = util::flatten(edge_added);
-		auto edge_added_grouped = util::group_by_key(edge_added_flatten);
-		seq<std::pair<nid_t,seq<conn>>> nbh_backward(edge_added_grouped.size());
+		auto edge_added_flatten = util::flatten(std::move(edge_added));
+		auto edge_added_grouped = util::group_by_key(std::move(edge_added_flatten));
 
-		cm::parallel_for(0, edge_added_grouped.size(), [&](size_t j){
-			nid_t v = edge_added_grouped[j].first;
-			auto &nbh_v_add = edge_added_grouped[j].second;
+		auto add_rev_nbhs = [&](auto &g){
+			// TODO: use std::remove_cvref in C++20
+			using agent_t = std::remove_cv_t<std::remove_reference_t<
+				decltype(g.get_edges(nid_t()))
+			>>;
+			seq<std::pair<nid_t,agent_t>> nbh_backward(edge_added_grouped.size());
 
-			auto edge_v_old = util::to<seq<conn>>(
-				l==0? layer_b.get_edges(v): layer_u[l].get_edges(v)
-			);
-			edge_v_old.insert(edge_v_old.end(),
-				std::make_move_iterator(nbh_v_add.begin()),
-				std::make_move_iterator(nbh_v_add.end())
-			);
+			cm::parallel_for(0, edge_added_grouped.size(), [&](size_t j){
+				nid_t v = edge_added_grouped[j].first;
+				auto &nbh_v_add = edge_added_grouped[j].second;
 
-			seq<conn> edge_v = algo::prune_simple(
-				std::move(edge_v_old), get_deg_bound(l)
-			);
-			nbh_backward[j] = {v, std::move(edge_v)};
-		});
+				auto edge_agent_v = g.get_edges(v);
+				auto edge_v = util::to<seq<edge>>(std::move(edge_agent_v));
+				edge_v.insert(edge_v.end(),
+					std::make_move_iterator(nbh_v_add.begin()),
+					std::make_move_iterator(nbh_v_add.end())
+				);
+
+				seq<conn> conn_v = algo::prune_simple(
+					conn_cast(std::move(edge_v)),
+					get_deg_bound(l)
+				);
+				edge_agent_v = edge_cast(conn_v);
+				nbh_backward[j] = {v, std::move(edge_agent_v)};
+			});
+			set_edges(std::move(nbh_backward));
+		};
+		l==0? add_rev_nbhs(layer_b): add_rev_nbhs(layer_u[l]);
 		util::debug_output("Adding backward edges\n");
-		set_edges(std::move(nbh_backward));
 	} // for-loop l
 
 	// finally, update the entrances
