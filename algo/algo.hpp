@@ -147,39 +147,37 @@ Seq prune_simple(
 	return cand;
 }
 
-template<class L=lookup_custom_tag<>, class S, class E, class D>
+template<class L=lookup_custom_tag<>, class Seq, class E, class D>
 auto/*Seq*/ prune_heuristic(
-	S &&cand, uint32_t size, E &&f_nbhs, D &&f_dist, const prune_control &ctrl={})
+	Seq cand, uint32_t size, E &&f_nbhs, D &&f_dist, const prune_control &ctrl={})
 {
 	using cm = custom<typename L::type>;
-	using Seq = std::remove_cv_t<std::remove_reference_t<S>>;
 	using nid_t = detail::second_elem_t<typename Seq::value_type>;
 	using conn = util::conn<nid_t>;
-
-	Seq workset = std::forward<S>(cand);
+	static_assert(std::is_same_v<typename Seq::value_type,conn>);
 	/*
 	if(ctrl.extend_nbh)
 	{
 		const auto &g = ctrl.graph;
 		std::unordered_set<nid_t> cand_ext;
-		for(const conn &c : workset)
+		for(const conn &c : cand)
 		{
 			cand_ext.insert(c.u);
 			for(nid_t pv : f_nbhs(c.u))
 				cand_ext.insert(pv);
 		}
 
-		workset.reserve(workset.size()+cand_ext.size());
+		cand.reserve(cand.size()+cand_ext.size());
 		for(nid_t pc : cand_ext)
-			workset.push_back({f_dist(pc), pc});
+			cand.push_back({f_dist(pc), pc});
 		cand_ext.clear();
 	}
 	*/
-	cm::sort(workset.begin(), workset.end());
+	cm::sort(cand.begin(), cand.end());
 
 	Seq res, pruned;
 	std::unordered_set<nid_t> nbh;
-	for(conn &c : workset)
+	for(const conn &c : cand)
 	{
 		const auto d_cu = c.d*ctrl.alpha;
 
@@ -204,10 +202,10 @@ auto/*Seq*/ prune_heuristic(
 					nbh.insert(pv);
 				});
 
-			res.push_back(std::move(c));
+			res.push_back(c);
 			if(res.size()==size) break;
 		}
-		else pruned.push_back(std::move(c));
+		else pruned.push_back(c);
 	}
 
 	if(ctrl.recycle_pruned)

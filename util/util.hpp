@@ -15,7 +15,6 @@ struct conn{
 	constexpr bool operator<(const conn &rhs) const{
 		return d<rhs.d;
 	}
-
 	constexpr bool operator>(const conn &rhs) const{
 		return d>rhs.d;
 	}

@@ -89,8 +89,9 @@ void for_each(R &&r, F &&f)
 template<class C, class R, class F=identity>
 C to(R &&r)
 {
-	static_assert(std::is_convertible_v<R,C>);
-	return C(std::forward<R>(r));
+	if constexpr(std::is_convertible_v<R,C>)
+		return C(std::forward<R>(r));
+	else return C(r.begin(), r.end());
 }
 
 /*

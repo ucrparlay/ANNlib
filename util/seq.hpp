@@ -36,8 +36,6 @@ public:
 		const_iterator(index_t index, const F *pf) :
 			base(index, pf){
 		}
-		const_iterator(base &&b) : base(std::move(b)){
-		}
 
 		reference operator*() const{
 			const F *pf = base::get_baseinfo();
