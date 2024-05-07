@@ -10,12 +10,12 @@
 #include <stdexcept>
 #include "parse_points.hpp"
 #include "graph/adj.hpp"
-#include "algo/HNSW.hpp"
+#include "algo/vamana.hpp"
 #include "dist.hpp"
 #include "parlay.hpp"
 #include "benchUtils.h"
 #include "cpam.hpp"
-using ANN::HNSW;
+using ANN::vamana;
 
 parlay::sequence<size_t> per_visited;
 parlay::sequence<size_t> per_eval;
@@ -80,8 +80,8 @@ struct desc_cpam : desc_default<DescLegacy>{
 
 // Switch the graph structure that is used
 template<class DescLegacy>
-// using desc = desc_default<DescLegacy>;
-using desc = desc_cpam<DescLegacy>;
+using desc = desc_default<DescLegacy>;
+// using desc = desc_cpam<DescLegacy>;
 
 // Visit all the vectors in the given 2D array of points
 // This triggers the page fetching if the vectors are mmap-ed
@@ -97,7 +97,7 @@ void visit_point(const T &array, size_t dim0, size_t dim1)
 }
 
 template<class U>
-double output_recall(HNSW<U> &g, parlay::internal::timer &t, uint32_t ef, uint32_t k, 
+double output_recall(vamana<U> &g, parlay::internal::timer &t, uint32_t ef, uint32_t k, 
 	uint32_t cnt_query, parlay::sequence<typename U::point_t> &q, parlay::sequence<parlay::sequence<uint32_t>> &gt, 
 	uint32_t rank_max, float beta, bool warmup, std::optional<float> radius, std::optional<uint32_t> limit_eval, bool refactor)
 {
@@ -137,7 +137,7 @@ double output_recall(HNSW<U> &g, parlay::internal::timer &t, uint32_t ef, uint32
 	});
 	const double time_query = t.next_time();
 	const auto qps = cnt_query/time_query;
-	printf("HNSW: Find neighbors: %.4f\n", time_query);
+	printf("vamana: Find neighbors: %.4f\n", time_query);
 
 	double ret_val = 0;
 	if(radius) // range search
@@ -240,7 +240,7 @@ double output_recall(HNSW<U> &g, parlay::internal::timer &t, uint32_t ef, uint32
 }
 
 template<class U>
-void output_recall(HNSW<U> &g, uint32_t dim, commandLine param, parlay::internal::timer &t)
+void output_recall(vamana<U> &g, uint32_t dim, commandLine param, parlay::internal::timer &t)
 {
 	const char* file_query = param.getOptionValue("-q");
 	const char* file_groundtruth = param.getOptionValue("-g");
@@ -373,7 +373,6 @@ void run_test(commandLine parameter) // intend to be pass-by-value manner
 {
 	const char *file_in = parameter.getOptionValue("-in");
 	const uint32_t cnt_points = parameter.getOptionLongValue("-n", 0);
-	const float m_l = parameter.getOptionDoubleValue("-ml", 0.36);
 	const uint32_t m = parameter.getOptionIntValue("-m", 40);
 	const uint32_t efc = parameter.getOptionIntValue("-efc", 60);
 	const float alpha = parameter.getOptionDoubleValue("-alpha", 1);
@@ -385,7 +384,7 @@ void run_test(commandLine parameter) // intend to be pass-by-value manner
 	const uint32_t prune = parameter.getOptionIntValue("-prune", 0);
 	// const double rank_frac = parameter.getOptionDoubleValue("-rank_frac", 1.0); // TODO: fix
 	
-	parlay::internal::timer t("HNSW", true);
+	parlay::internal::timer t("vamana", true);
 
 	using T = typename U::point_t::elem_t;
 	auto [ps,dim] = load_point(file_in, to_point<T>, cnt_points);
@@ -395,8 +394,8 @@ void run_test(commandLine parameter) // intend to be pass-by-value manner
 	visit_point(ps, ps.size(), dim);
 	t.next("Fetch input vectors");
 
-	fputs("Start building HNSW\n", stderr);
-	HNSW<U> g(dim, m_l, m, efc, alpha);
+	fputs("Start building vamana\n", stderr);
+	vamana<U> g(dim, m, efc, alpha);
 	g.insert(ps.begin(), ps.begin()+ps.size(), batch_base);
 	t.next("Build index");
 
@@ -422,17 +421,11 @@ void run_test(commandLine parameter) // intend to be pass-by-value manner
 		t.next("Refactor");
 	}
 
-	const uint32_t height = g.get_height();
-	printf("Highest level: %u\n", height);
-	puts("level     #vertices         #degrees  max_degree");
-	for(uint32_t i=0; i<=height; ++i)
-	{
-		const uint32_t level = height-i;
-		size_t num_nodes = g.num_nodes(level);
-		size_t num_edges = g.num_edges(level);
-		size_t max_deg = g.max_deg(level);
-		printf("#%2u: %14lu %16lu %11lu\n", level, num_nodes, num_edges, max_deg);
-	}
+	puts("#vertices         #degrees  max_degree");
+	size_t num_nodes = g.num_nodes();
+	size_t num_edges = g.num_edges();
+	size_t max_deg = g.max_deg();
+	printf("%14lu %16lu %11lu\n", num_nodes, num_edges, max_deg);
 	t.next("Count vertices and degrees");
 
 	if(file_out)

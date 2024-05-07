@@ -16,13 +16,13 @@
 #include <stdexcept>
 #include "parse_points.hpp"
 #include "graph/adj.hpp"
-#include "algo/HNSW.hpp"
+#include "algo/vamana.hpp"
 #include "util/intrin.hpp"
 #include "dist.hpp"
 #include "parlay.hpp"
 #include "benchUtils.h"
 #include "cpam.hpp"
-using ANN::HNSW;
+using ANN::vamana;
 
 parlay::sequence<size_t> per_visited;
 parlay::sequence<size_t> per_eval;
@@ -69,11 +69,11 @@ struct desc{
 		return DescLegacy::distance(cu, cv, dim);
 	}
 
-	template<typename Nid, class Ext>
-	using graph_t = ANN::graph::adj_seq<Nid,Ext>;
+	template<typename Nid, class Ext, class Edge>
+	using graph_t = ANN::graph::adj_seq<Nid,Ext,Edge>;
 
-	template<typename Nid, class Ext>
-	using graph_aux = ANN::graph::adj_map<Nid,Ext>;
+	template<typename Nid, class Ext, class Edge>
+	using graph_aux = ANN::graph::adj_map<Nid,Ext,Edge>;
 };
 
 template<class DescLegacy>
@@ -102,21 +102,14 @@ void visit_point(const T &array, size_t dim0, size_t dim1)
 template<class G>
 void print_stat(const G &g)
 {
-	const uint32_t height = g.get_height();
-	printf("Highest level: %u\n", height);
-	puts("level     #vertices         edges  avg. deg");
-	for(uint32_t i=0; i<=height; ++i)
-	{
-		const uint32_t level = height-i;
-		size_t cnt_vertex = g.num_nodes(level);
-		size_t cnt_degree = g.num_edges(level);
-		printf("#%2u: %14lu %16lu %10.2f\n", 
-			level, cnt_vertex, cnt_degree, float(cnt_degree)/cnt_vertex
-		);
-	}
-	
+	puts("#vertices         edges  avg. deg");
+	size_t cnt_vertex = g.num_nodes();
+	size_t cnt_degree = g.num_edges();
+	printf("%14lu %16lu %10.2f\n", 
+		cnt_vertex, cnt_degree, float(cnt_degree)/cnt_vertex
+	);
 }
-
+/*
 // assume the snapshots are only of increasing insertions
 template<class R>
 void print_stat_snapshots(const R &snapshots)
@@ -166,7 +159,6 @@ void print_stat_snapshots(const R &snapshots)
 			);
 		}
 	}
-
 	// sample 100 vertices and observe the historical changes of their edge lists
 	std::mt19937 gen(1206);
 	std::uniform_int_distribution<uint32_t> distrib(0, fin.num_nodes(0));
@@ -224,6 +216,7 @@ void print_stat_snapshots(const R &snapshots)
 		putchar('\n');
 	}
 }
+*/
 
 template<class G, class Seq>
 auto find_nbhs(const G &g, const Seq &q, uint32_t k, uint32_t ef)
@@ -354,7 +347,6 @@ void run_test(commandLine parameter) // intend to be pass-by-value manner
 	const size_t size_init = parameter.getOptionLongValue("-init", 0);
 	const size_t size_step = parameter.getOptionLongValue("-step", 0);
 	size_t size_max = parameter.getOptionLongValue("-max", 0);
-	const float m_l = parameter.getOptionDoubleValue("-ml", 0.36);
 	const uint32_t m = parameter.getOptionIntValue("-m", 40);
 	const uint32_t efc = parameter.getOptionIntValue("-efc", 60);
 	const float alpha = parameter.getOptionDoubleValue("-alpha", 1);
@@ -384,9 +376,9 @@ void run_test(commandLine parameter) // intend to be pass-by-value manner
 	visit_point(q, q.size(), dim);
 	t.next("Prefetch vectors");
 
-	HNSW<U> g(dim, m_l, m, efc, alpha);
-	std::vector<HNSW<U>> snapshots;
-	puts("Initialize HNSW");
+	vamana<U> g(dim, m, efc, alpha);
+	std::vector<vamana<U>> snapshots;
+	puts("Initialize vamana");
 
 	for(size_t size_last=0, size_curr=size_init;
 		size_curr<=size_max;
@@ -419,7 +411,7 @@ void run_test(commandLine parameter) // intend to be pass-by-value manner
 		puts("---");
 	}
 
-	print_stat_snapshots(snapshots);
+	// print_stat_snapshots(snapshots);
 }
 
 int main(int argc, char **argv)
@@ -440,7 +432,7 @@ int main(int argc, char **argv)
 	auto run_test_helper = [&](auto type){ // emulate a generic lambda in C++20
 		using T = decltype(type);
 		if(!strcmp(dist_func,"L2"))
-			run_test<desc_cpam<descr_l2<T>>>(parameter);
+			run_test<desc<descr_l2<T>>>(parameter);
 		/*
 		else if(!strcmp(dist_func,"angular"))
 			run_test<desc<descr_ang<T>>>(parameter);
