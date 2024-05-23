@@ -5,6 +5,7 @@
 #include <utility>
 #include <type_traits>
 #include <optional>
+#include <ranges>
 #include <unordered_map>
 #include "map.hpp"
 #include "util/seq.hpp"
@@ -40,10 +41,10 @@ public:
 	}
 
 	Nid insert(const Pid &pid){
-		return mapping.insert({Nid(pid),pid});
+		return mapping.insert({Nid(pid),pid}).first->first;
 	}
 	Nid insert(Pid &&pid){
-		return mapping.insert({Nid(pid),std::move(pid)});
+		return mapping.insert({Nid(pid),std::move(pid)}).first->first;
 	}
 
 	Pid get_pid(Nid nid) const{
@@ -55,8 +56,10 @@ public:
 	}
 
 	std::optional<Nid> find_nid(const Pid &pid) const{
-		auto it = *mapping.find(Nid(pid));
-		return it==mapping.end()? std::nullopt: {it->first};
+		auto it = mapping.find(Nid(pid));
+		if(it==mapping.end())
+			return std::nullopt;
+		return {it->first};
 	}
 };
 
