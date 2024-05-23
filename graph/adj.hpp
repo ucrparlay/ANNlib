@@ -304,6 +304,14 @@ public:
 		else add_nodes(ns.begin(), ns.end());
 	}
 
+	template<class Iter>
+	void remove_nodes(Iter begin, Iter end){
+		const auto n = std::distance(begin, end);
+		cm::parallel_for(0, n, [&](size_t i){
+			nodes[i] = typename decltype(nodes)::value_type{};
+		});
+	}
+
 	template<class F>
 	void iter_each(F &&f) const{
 		for(const auto &u : nodes)
@@ -380,6 +388,12 @@ public:
 			);
 		}
 		else add_nodes(ns.begin(), ns.end());
+	}
+
+	template<class Iter>
+	void remove_nodes(Iter begin, Iter end){
+		for(auto it=begin; it!=end; ++it)
+			nodes.erase(*it);
 	}
 
 	// TODO: eliminate redundant code by deducing 'this' in C++23

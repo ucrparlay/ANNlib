@@ -47,6 +47,16 @@ public:
 		return mapping.insert({Nid(pid),std::move(pid)}).first->first;
 	}
 
+	template<typename Iter>
+	void erase(Iter begin, Iter end){
+		for(auto it=begin; it!=end; ++it)
+			mapping.erase(Nid(*it));
+	}
+
+	void erase(Nid nid){
+		mapping.erase(nid);
+	}
+
 	Pid get_pid(Nid nid) const{
 		return mapping.find(nid)->second;
 	}
@@ -55,11 +65,21 @@ public:
 		return Nid(pid);
 	}
 
+	Nid front_nid() const{
+		return mapping.begin()->first;
+	};
+
+	// TODO: consider to remove it
 	std::optional<Nid> find_nid(const Pid &pid) const{
 		auto it = mapping.find(Nid(pid));
 		if(it==mapping.end())
 			return std::nullopt;
 		return {it->first};
+	}
+
+	// TODO: use a more unambiguous name
+	bool contain_nid(Nid nid) const{
+		return mapping.contains(nid);
 	}
 };
 

@@ -7,6 +7,7 @@
 #include <string>
 #include <sstream>
 #include <iterator>
+#include <ranges>
 #include <vector>
 #include <queue>
 #include <map>
@@ -14,7 +15,8 @@
 #include <unordered_map>
 #include <chrono>
 #include <stdexcept>
-#include "parse_points.hpp"
+#include <parlay/primitives.h>
+#include <parlay/parallel.h>
 #include "graph/adj.hpp"
 #include "algo/vamana.hpp"
 #include "util/intrin.hpp"
@@ -109,7 +111,7 @@ void print_stat(const G &g)
 		cnt_vertex, cnt_degree, float(cnt_degree)/cnt_vertex
 	);
 }
-/*
+
 // assume the snapshots are only of increasing insertions
 template<class R>
 void print_stat_snapshots(const R &snapshots)
@@ -216,7 +218,7 @@ void print_stat_snapshots(const R &snapshots)
 		putchar('\n');
 	}
 }
-*/
+
 
 template<class G, class Seq>
 auto find_nbhs(const G &g, const Seq &q, uint32_t k, uint32_t ef)
@@ -376,6 +378,7 @@ void run_test(commandLine parameter) // intend to be pass-by-value manner
 	visit_point(q, q.size(), dim);
 	t.next("Prefetch vectors");
 
+	decltype(ps) baseset;
 	vamana<U> g(dim, m, efc, alpha);
 	std::vector<vamana<U>> snapshots;
 	puts("Initialize vamana");
@@ -393,16 +396,26 @@ void run_test(commandLine parameter) // intend to be pass-by-value manner
 		g.insert(ins_begin, ins_end, batch_base);
 		t.next("Finish insertion");
 
+		auto pids = std::ranges::subrange(ins_begin,ins_end) |
+			std::views::take((size_curr-size_last)/2) |
+			std::views::transform([](const auto &p){return p.get_id();});
+		g.erase(pids.begin(), pids.end());
+		t.next("Finish deletion");
+
 		snapshots.push_back(g);
 
 		puts("Collect statistics");
-		// print_stat(g);
+		print_stat(g);
 
 		puts("Search for neighbors");
 		auto res = find_nbhs(g, q, k, ef);
 
 		puts("Generate groundtruth");
-		auto baseset = parlay::make_slice(ps.begin(), ins_end);
+
+		baseset.append(
+			ins_begin+(size_curr-size_last)/2,
+			ins_end
+		);
 		auto gt = ConstructKnng<U>(baseset, q, dim, k);
 
 		puts("Compute recall");

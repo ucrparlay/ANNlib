@@ -31,6 +31,13 @@ auto group_by_key(Seq &&seq)
 	return cm::group_by_key(std::forward<Seq>(seq));
 }
 
+template<typename Seq, class F, class L=lookup_custom_tag<>>
+auto filter(Seq &&seq, F &&f)
+{
+	using cm = custom<typename L::type>;
+	return cm::filter(std::forward<Seq>(seq), std::forward<F>(f));
+}
+
 template<class SR, typename S1, typename S2>
 SR zip(S1 &&s1, S2 &&s2)
 {

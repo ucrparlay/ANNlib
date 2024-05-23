@@ -9,6 +9,7 @@
 #include <random>
 #include <memory>
 #include <functional>
+#include <ranges>
 #include <fstream>
 #include <string>
 #include <unordered_map>
@@ -20,6 +21,7 @@
 #include "map/direct.hpp"
 #include "util/debug.hpp"
 #include "util/helper.hpp"
+#include "util/vec.hpp"
 #include "custom/custom.hpp"
 
 namespace ANN::vamana_details{
@@ -38,6 +40,8 @@ struct edge : util::conn<Nid>{
 	constexpr bool operator!=(const edge &rhs) const{
 		return this->u!=rhs.u;
 	}
+
+	mutable uint32_t livestamp = 0;
 };
 
 } // namespace ANN::vamana_details
@@ -56,18 +60,19 @@ class vamana
 {
 	using cm = custom<typename lookup_custom_tag<Desc>::type>;
 
+	template<typename T>
+	using seq = typename cm::seq<T>;
+
 	typedef uint32_t nid_t;
 	using point_t = typename Desc::point_t;
 	using pid_t = typename point_t::id_t;
 	using coord_t = typename point_t::coord_t;
+	using md_t = util::vec<seq<float>>;
 	using dist_t = typename Desc::dist_t; // TODO: elaborate
 	using conn = util::conn<nid_t>;
 	using edge = vamana_details::edge<nid_t>;
 	using search_control = algo::search_control;
 	using prune_control = algo::prune_control;
-
-	template<typename T>
-	using seq = typename cm::seq<T>;
 
 public:
 	struct result_t{
@@ -92,12 +97,16 @@ public:
 	template<typename Iter>
 	void insert(Iter begin, Iter end, float batch_base=2);
 
+	template<typename Iter>
+	void erase(Iter begin, Iter end);
+
 	template<class Seq=seq<result_t>>
 	Seq search(
 		const coord_t &cq, uint32_t k, uint32_t ef, const search_control &ctrl={}
 	) const;
 
 private:
+	/*
 	static seq<edge>&& edge_cast(seq<conn> &&cs){
 		return reinterpret_cast<seq<edge>&&>(std::move(cs));
 	}
@@ -109,6 +118,17 @@ private:
 	}
 	static const seq<conn>& conn_cast(const seq<edge> &es){
 		return reinterpret_cast<const seq<conn>&>(es);
+	}
+	*/
+	seq<edge> edge_cast(const seq<conn> &cs){
+		// TODO: use range in C++20
+		auto es = util::delayed_seq(cs.size(), [&](size_t i){
+			return edge{cs[i], deltick};
+		});
+		return util::to<seq<edge>>(es);
+	}
+	seq<conn> conn_cast(const seq<edge> &es){
+		return util::to<seq<conn>>(es);
 	}
 
 	struct node_t{
@@ -126,8 +146,10 @@ private:
 
 	graph_t g;
 	map::direct<pid_t,nid_t> id_map;
+	uint32_t deltick = 1;
 
-	seq<nid_t> entrance; // To init
+	nid_t ep; // entry point
+	md_t medoid;
 	uint32_t dim;
 	uint32_t R;
 	uint32_t L;
@@ -168,25 +190,21 @@ private:
 		return gen_f_dist(g.get_node(u)->get_coord());
 	}
 
-	template<class G>
-	auto gen_f_nbhs(const G &g) const{
-		return [&](nid_t u) -> decltype(auto){
-			// TODO: use std::views::transform in C++20 / util::tranformed_view
-			// TODO: define the return type as a view, and use auto to receive it
+	auto gen_f_nbhs() const{
+		return [&](nid_t u){
+			auto f = std::views::filter([&](const edge &e){
+				auto &ls = e.livestamp;
+				if(ls==0) return false;
+				if(ls==deltick) return true;
+				ls = id_map.contain_nid(e.u)? deltick: 0;
+				return ls!=0;
+			});
+			auto t = std::views::transform([&](const edge &e){return e.u;});
+
 			if constexpr(std::is_reference_v<decltype(g.get_edges(u))>)
-			{
-				const auto &edges = g.get_edges(u);
-				return util::delayed_seq(edges.size(), [&](size_t i){
-					return edges[i].u;
-				});
-			}
+				return std::ranges::ref_view(g.get_edges(u)) | f | t;
 			else
-			{
-				auto edges = g.get_edges(u);
-				return util::delayed_seq(edges.size(), [=](size_t i){
-					return edges[i].u;
-				});
-			}	
+				return std::ranges::owning_view(g.get_edges(u)) | f | t;
 		};
 	}
 
@@ -240,15 +258,17 @@ void vamana<Desc>::insert(Iter begin, Iter end, float batch_base)
 	// std::random_device rd;
 	auto perm = cm::random_permutation(n/*, rd()*/);
 	auto rand_seq = util::delayed_seq(n, [&](size_t i) -> decltype(auto){
-		return *(begin+perm[i]);
+		// return *(begin+perm[i]); // CHECK: restore before release
+		return *(begin+i);
 	});
 
 	size_t cnt_skip = 0;
 	if(g.empty())
 	{
-		const nid_t ep_init = id_map.insert(rand_seq.begin()->get_id());
-		g.add_node(ep_init, node_t{rand_seq.begin()->get_coord()});
-		entrance.push_back(ep_init);
+		auto init = rand_seq.begin();
+		ep = id_map.insert(init->get_id());
+		medoid = md_t(util::inner_t{}, init->get_coord(), dim);
+		g.add_node(ep, node_t{init->get_coord()});
 		cnt_skip = 1;
 	}
 
@@ -311,30 +331,49 @@ void vamana<Desc>::insert_batch_impl(Iter begin, Iter end)
 		return std::pair{nids[i], node_t{(begin+i)->get_coord()}};
 	}));
 
+	const auto n_prev = g.num_nodes();
+	// TODO: make util::filter compatible with ranges
+/*	auto coord_drift = cm::reduce(
+		std::ranges::subrange(begin, end) |
+		std::views::filter([&](auto &&p){return !!id_map.contain_nid(p.get_id());}) |
+		std::views::transform([&](auto &&p){return md_t(util::inner_t{},p.get_coord(),dim);})
+	);*/
+	auto it_refs = util::delayed_seq(size_batch, [&](size_t i){
+		return begin+i;
+	});
+	auto refs_new = util::filter(it_refs, [&](Iter it){
+		return !!id_map.find_nid(it->get_id());
+	});
+	auto coords_new = util::delayed_seq(
+		refs_new.size(),
+		[&](size_t i){return md_t(util::inner_t{},refs_new[i]->get_coord(),dim);}
+	);
+	md_t coord_drift = cm::reduce(coords_new);
+
 	// below we (re)generate edges incident to nodes in the current batch
 	// add adges from the new points
+	// TODO: change edge_added to conn_added
 	seq<seq<std::pair<nid_t,edge>>> edge_added(size_batch);
 	seq<std::pair<nid_t,seq<edge>>> nbh_forward(size_batch);
 	cm::parallel_for(0, size_batch, [&](size_t i){
 		const nid_t u = nids[i];
 
-		auto &eps_u = entrance;
 		search_control sctrl; // TODO: use designated initializers in C++20
 		sctrl.log_per_stat = i;
-		seq<conn> res = algo::beamSearch(gen_f_nbhs(g), gen_f_dist(u), eps_u, L, sctrl);
+		seq<conn> res = algo::beamSearch(gen_f_nbhs(), gen_f_dist(u), seq<nid_t>{ep}, L, sctrl);
 
 		prune_control pctrl; // TODO: use designated intializers in C++20
 		pctrl.alpha = alpha;
 		seq<conn> conn_u = algo::prune_heuristic(
 			std::move(res), get_deg_bound(), 
-			gen_f_nbhs(g), gen_f_dist(u), pctrl
+			gen_f_nbhs(), gen_f_dist(u), pctrl
 		);
 		// record the edge for the backward insertion later
 		auto &edge_cur = edge_added[i];
 		edge_cur.clear();
 		edge_cur.reserve(conn_u.size());
 		for(const auto &[d,v] : conn_u)
-			edge_cur.emplace_back(v, edge{d,u});
+			edge_cur.emplace_back(v, edge{{d,u}, deltick});
 
 		// store for batch insertion
 		nbh_forward[i] = {u, edge_cast(std::move(conn_u))};
@@ -357,7 +396,12 @@ void vamana<Desc>::insert_batch_impl(Iter begin, Iter end)
 		auto &nbh_v_add = edge_added_grouped[j].second;
 
 		auto edge_agent_v = g.get_edges(v);
-		auto edge_v = util::to<seq<edge>>(std::move(edge_agent_v));
+		auto edge_v = util::to<seq<edge>>(
+			std::move(edge_agent_v) |
+			std::views::filter([&](const edge &e){
+				return id_map.contain_nid(e.u);
+			})
+		);
 		edge_v.insert(edge_v.end(),
 			std::make_move_iterator(nbh_v_add.begin()),
 			std::make_move_iterator(nbh_v_add.end())
@@ -367,7 +411,7 @@ void vamana<Desc>::insert_batch_impl(Iter begin, Iter end)
 			conn_cast(std::move(edge_v)),
 			get_deg_bound()
 		);
-		edge_agent_v = edge_cast(conn_v);
+		edge_agent_v = edge_cast(std::move(conn_v));
 		nbh_backward[j] = {v, std::move(edge_agent_v)};
 	});
 	util::debug_output("Adding backward edges\n");
@@ -375,7 +419,56 @@ void vamana<Desc>::insert_batch_impl(Iter begin, Iter end)
 
 	// finally, update the entrances
 	util::debug_output("Updating entrance\n");
-	// UNIMPLEMENTED
+	const auto n_curr = g.num_nodes();
+	((medoid*=n_prev)+=coord_drift)/=n_curr;
+	util::vec<seq<typename point_t::elem_t>> t(util::inner_t{}, medoid.data(), dim);
+	ep = algo::beamSearch(
+		gen_f_nbhs(),
+		[&](nid_t v){return Desc::distance(
+			t.data(), g.get_node(v)->get_coord(), dim);
+		},
+		seq<nid_t>{ep},
+		1
+	)[0].u;
+}
+
+template<class Desc>
+template<typename Iter>
+void vamana<Desc>::erase(Iter begin, Iter end)
+{
+	static_assert(std::is_convertible_v<
+		typename std::iterator_traits<Iter>::value_type, pid_t
+	>);
+	/*
+	static_assert(std::is_base_of_v<
+		std::random_access_iterator_tag,
+		typename std::iterator_traits<Iter>::iterator_category
+	>);*/
+
+	auto nids = std::ranges::subrange(begin,end) |
+		std::views::transform([&](const pid_t &p){return id_map.get_nid(p);});
+
+	auto r = nids | std::views::transform([&](nid_t u){
+		return md_t(util::inner_t{}, g.get_node(u)->get_coord(), dim);
+	});
+	auto drift = cm::reduce(r);
+
+	((medoid*=g.num_nodes())-=drift);
+	g.remove_nodes(nids.begin(), nids.end());
+
+	id_map.erase(begin, end);
+	deltick++;
+
+	medoid /= g.num_nodes();
+	util::vec<seq<typename point_t::elem_t>> t(util::inner_t{}, medoid.data(), dim);
+	ep = algo::beamSearch(
+		gen_f_nbhs(),
+		[&](nid_t v){return Desc::distance(
+			t.data(), g.get_node(v)->get_coord(), dim);
+		},
+		seq<nid_t>{id_map.front_nid()},
+		1
+	)[0].u;
 }
 
 template<class Desc>
@@ -383,8 +476,7 @@ template<class Seq>
 Seq vamana<Desc>::search(
 	const coord_t &cq, uint32_t k, uint32_t ef, const search_control &ctrl) const
 {
-	seq<nid_t> eps = entrance;
-	auto nbhs = beamSearch(gen_f_nbhs(g), gen_f_dist(cq), eps, ef, ctrl);
+	auto nbhs = beamSearch(gen_f_nbhs(), gen_f_dist(cq), seq<nid_t>{ep}, ef, ctrl);
 
 	nbhs = algo::prune_simple(std::move(nbhs), k/*, ctrl*/); // TODO: set ctrl
 	cm::sort(nbhs.begin(), nbhs.end());

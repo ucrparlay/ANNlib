@@ -27,6 +27,9 @@ public:
 	template<class Seq>
 	void add_nodes(Seq&&);
 	size_t num_nodes() const;
+	void remove_node(nid_t);
+	template<typename Iter>
+	void remove_nodes(Iter, Iter);
 };
 
 template<class>

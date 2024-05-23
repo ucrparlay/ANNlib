@@ -2,6 +2,7 @@
 #define _ANN_TEST_PARLAY_HPP
 
 #include <utility>
+#include <ranges>
 #include "custom/undef.hpp"
 #include <parlay/parallel.h>
 #include <parlay/primitives.h>
@@ -60,7 +61,7 @@ public:
 	}
 
 	template<class R, // TODO: shorten
-		class T=std::remove_reference_t<typename std::remove_reference_t<R>::value_type>,
+		class T=std::remove_reference_t<std::ranges::range_value_t<typename std::remove_reference_t<R>>>,
 		class BinaryOp=std::plus<>>
 	static auto reduce(R &&range, T init={}, BinaryOp op={})
 	{
@@ -113,6 +114,12 @@ public:
 	static auto group_by_key(Seq &&seq)
 	{
 		return parlay::group_by_key(std::forward<Seq>(seq));
+	}
+
+	template<typename Seq, class F, class L=lookup_custom_tag<>>
+	static auto filter(Seq &&seq, F &&f)
+	{
+		return parlay::filter(std::forward<Seq>(seq), std::forward<F>(f));
 	}
 
 	template<typename Iter>
