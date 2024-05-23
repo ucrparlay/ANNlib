@@ -14,7 +14,7 @@ auto pack_index(Seq &&seq)
 	using cm = custom<typename L::type>;
 	// return cm::pack_index(std::forward<Seq>(seq));
 	// TODO: fix
-	return cm::pack_index(parlay::slice(seq.begin(),seq.end()));
+	return cm::pack_index(std::forward<Seq>(seq));
 }
 
 template<class Seq, class L=lookup_custom_tag<>>

@@ -5,6 +5,7 @@
 #include <limits>
 #include <type_traits>
 #include "iter.hpp"
+#include "util.hpp"
 
 namespace ANN::util{
 
