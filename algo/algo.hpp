@@ -47,7 +47,7 @@ auto beamSearch(
 	const auto nid_invalid = std::numeric_limits<nid_t>::max();
 	const uint32_t bits = ef>2? std::ceil(std::log2(ef))*2-2: 2;
 	const uint32_t mask = (1u<<bits)-1;
-	Seq visited(mask+1, nid_invalid);
+	typename cm::seq<nid_t> visited(mask+1, nid_invalid);
 	uint32_t cnt_visited = 0;
 	typename cm::seq<conn> workset;
 	std::set<conn> cand; // TODO: test dual heaps
