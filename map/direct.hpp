@@ -1,9 +1,11 @@
 #ifndef _ANN_MAP_DIRECT_HPP
 #define _ANN_MAP_DIRECT_HPP
 
+#include <cstdint>
 #include <iterator>
 #include <utility>
 #include <type_traits>
+#include <functional>
 #include <optional>
 #include <ranges>
 #include <unordered_map>
@@ -15,6 +17,10 @@ namespace ANN::map{
 template<typename Pid, typename Nid>
 class direct{
 	std::unordered_map<Nid,Pid> mapping;
+	static Nid f(const Pid &pid){
+		static_assert(std::is_convertible_v<size_t,Nid>);
+		return std::hash<Pid>{}(pid);
+	}
 public:
 	template<typename Iter>
 	void insert(Iter begin, Iter end){
@@ -23,7 +29,7 @@ public:
 		auto ps = util::delayed_seq(n, [&](size_t i){
 			auto &&pid = *(begin+i);
 			return std::pair<Nid,Pid>(
-				Nid(pid), std::forward<decltype(pid)>(pid)
+				f(pid), std::forward<decltype(pid)>(pid)
 			);
 		});
 		mapping.insert(ps.begin(), ps.end());
@@ -41,16 +47,16 @@ public:
 	}
 
 	Nid insert(const Pid &pid){
-		return mapping.insert({Nid(pid),pid}).first->first;
+		return mapping.insert({f(pid),pid}).first->first;
 	}
 	Nid insert(Pid &&pid){
-		return mapping.insert({Nid(pid),std::move(pid)}).first->first;
+		return mapping.insert({f(pid),std::move(pid)}).first->first;
 	}
 
 	template<typename Iter>
 	void erase(Iter begin, Iter end){
 		for(auto it=begin; it!=end; ++it)
-			mapping.erase(Nid(*it));
+			mapping.erase(f(*it));
 	}
 
 	void erase(Nid nid){
@@ -61,8 +67,7 @@ public:
 		return mapping.find(nid)->second;
 	}
 	Nid get_nid(const Pid &pid) const{
-		static_assert(std::is_convertible_v<Pid,Nid>);
-		return Nid(pid);
+		return f(pid);
 	}
 
 	Nid front_nid() const{
@@ -71,7 +76,7 @@ public:
 
 	// TODO: consider to remove it
 	std::optional<Nid> find_nid(const Pid &pid) const{
-		auto it = mapping.find(Nid(pid));
+		auto it = mapping.find(f(pid));
 		if(it==mapping.end())
 			return std::nullopt;
 		return {it->first};

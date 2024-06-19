@@ -71,6 +71,8 @@ struct is_dummy :
 	std::is_same<dummy<void>, TT<void>>{
 };
 
+struct inner_t{};
+
 template<template<typename> class TT>
 inline constexpr bool is_dummy_v = is_dummy<TT>::value;
 
@@ -85,7 +87,7 @@ public:
 	pointer operator->() const& noexcept{
 		return const_cast<pointer>(&value);
 	}
-	pointer operator->() && = delete;
+	// pointer operator->() && = delete;
 	reference operator*() const& noexcept{
 		return const_cast<reference>(value);
 	}
@@ -93,9 +95,7 @@ public:
 		return std::move(const_cast<reference>(value));
 	}
 
-	// TODO: use `requires` instead in C++20
-	template<typename=std::enable_if_t<std::is_default_constructible_v<T>>>
-	materialized_ptr() : value(){
+	materialized_ptr() requires std::is_default_constructible_v<T> : value(){
 	}
 	template<typename U>
 	materialized_ptr(U &&value) :

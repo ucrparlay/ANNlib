@@ -173,7 +173,7 @@ private:
 				g(g), c(c), dim(dim){
 			}
 			dist_t operator()(nid_t v) const{
-				return Desc::distance(c, g.get().get_node(v)->get_coord(), dim);
+				return Desc::distance(c.get(), g.get().get_node(v)->get_coord(), dim);
 			}
 			dist_t operator()(nid_t u, nid_t v) const{
 				return Desc::distance(
@@ -286,22 +286,22 @@ void vamana<Desc>::insert(Iter begin, Iter end, float batch_base)
 		if(batch_end>n*(progress+0.05))
 		{
 			progress = float(batch_end)/n;
-			fprintf(stderr, "Built: %3.2f%%\n", progress*100);
-			fprintf(stderr, "# visited: %lu\n", cm::reduce(per_visited));
-			fprintf(stderr, "# eval: %lu\n", cm::reduce(per_eval));
-			fprintf(stderr, "size of C: %lu\n", cm::reduce(per_size_C));
-			per_visited.clear();
-			per_eval.clear();
-			per_size_C.clear();
+			// fprintf(stderr, "Built: %3.2f%%\n", progress*100);
+			// fprintf(stderr, "# visited: %lu\n", cm::reduce(per_visited));
+			// fprintf(stderr, "# eval: %lu\n", cm::reduce(per_eval));
+			// fprintf(stderr, "size of C: %lu\n", cm::reduce(per_size_C));
+			// per_visited.clear();
+			// per_eval.clear();
+			// per_size_C.clear();
 		}
 	}
 
-	fprintf(stderr, "# visited: %lu\n", cm::reduce(per_visited));
-	fprintf(stderr, "# eval: %lu\n", cm::reduce(per_eval));
-	fprintf(stderr, "size of C: %lu\n", cm::reduce(per_size_C));
-	per_visited.clear();
-	per_eval.clear();
-	per_size_C.clear();
+	// fprintf(stderr, "# visited: %lu\n", cm::reduce(per_visited));
+	// fprintf(stderr, "# eval: %lu\n", cm::reduce(per_eval));
+	// fprintf(stderr, "size of C: %lu\n", cm::reduce(per_size_C));
+	// per_visited.clear();
+	// per_eval.clear();
+	// per_size_C.clear();
 }
 
 template<class Desc>
@@ -311,9 +311,9 @@ void vamana<Desc>::insert_batch_impl(Iter begin, Iter end)
 	const size_t size_batch = std::distance(begin,end);
 	seq<nid_t> nids(size_batch);
 
-	per_visited.resize(size_batch);
-	per_eval.resize(size_batch);
-	per_size_C.resize(size_batch);
+	// per_visited.resize(size_batch);
+	// per_eval.resize(size_batch);
+	// per_size_C.resize(size_batch);
 
 	// before the insertion, prepare the needed data
 	// `nids[i]` is the nid of the node corresponding to the i-th 
@@ -348,7 +348,7 @@ void vamana<Desc>::insert_batch_impl(Iter begin, Iter end)
 		refs_new.size(),
 		[&](size_t i){return md_t(util::inner_t{},refs_new[i]->get_coord(),dim);}
 	);
-	md_t coord_drift = cm::reduce(coords_new);
+	md_t coord_drift = cm::reduce(coords_new, md_t(dim));
 
 	// below we (re)generate edges incident to nodes in the current batch
 	// add adges from the new points

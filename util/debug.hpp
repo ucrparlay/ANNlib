@@ -17,8 +17,8 @@ inline void debug_output(Args ...args)
 
 } // namespace ANN::util
 
-extern parlay::sequence<size_t> per_visited;
-extern parlay::sequence<size_t> per_eval;
-extern parlay::sequence<size_t> per_size_C;
+// extern parlay::sequence<size_t> per_visited;
+// extern parlay::sequence<size_t> per_eval;
+// extern parlay::sequence<size_t> per_size_C;
 
 #endif // _ANN_UTIL_DEBUG_HPP

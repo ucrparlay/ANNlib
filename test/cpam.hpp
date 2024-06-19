@@ -17,8 +17,6 @@
 #include "pam/pam.h"
 #include "cpam/cpam.h"
 
-struct inner_t{};
-
 // Wrap a (fancy) pointer type UPtr to meet the requirements of A::pointer
 // where A is an Allocator following the C++ named requirements
 template<class UPtr>
@@ -32,6 +30,7 @@ class ptr_adapter :
 		ptr_adapter<UPtr>, size_t, ANN::util::empty
 	>;
 	using T = typename UPtr::element_type;
+	using inner_t = ANN::util::inner_t;
 
 public:
 	typedef T value_type;
@@ -125,7 +124,7 @@ public:
 	pointer allocate(sz_t n, Args ...args){
 		return pointer(
 			Alloc::allocate(n, std::forward<Args>(args)...),
-			[=](auto *p){this->Alloc::deallocate(p,n);},
+			[&](auto *p){this->Alloc::deallocate(p,n);},
 			base()
 		);
 	}

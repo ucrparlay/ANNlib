@@ -1,6 +1,7 @@
 #ifndef _ANN_GRAPH_HPP
 #define _ANN_GRAPH_HPP
 
+#include <cstdint>
 #include <type_traits>
 #include "ANN.hpp"
 

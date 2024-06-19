@@ -102,7 +102,7 @@ auto beamSearch(
 				cand.erase(std::prev(cand.end()));
 		});
 	}
-
+/*
 	if(ctrl.log_per_stat)
 	{
 		const auto qid = *ctrl.log_per_stat;
@@ -110,7 +110,7 @@ auto beamSearch(
 		per_eval[qid] += cand.size()+cnt_eval;
 		per_size_C[qid] += cnt_eval;
 	}
-
+*/
 	return workset;
 }
 
