@@ -162,12 +162,10 @@ The expected output is
 [right] in distance of 10.0
 ```
 
-since among the given points `left:(0,0)`, `right:(4,0)`, and `top:(2,1)`,  the points `top` and `right` are the two nearest ones to the target`(3,3)` under the defined distance function.
+since among the given points `left:(0,0)`, `right:(4,0)`, and `top:(2,1)`,  the points `top` and `right` are the two nearest to the target`(3,3)` under the defined distance function.
 
 
 
 ## Interfaces
 
-Beyond simply using the provided components in the ANNlib, for ones who want to read the code 
-
-See detailed interface documentation in [Interfaces](docs/interfaces.md)
+Beyond simply using the provided components in the ANNlib, for ones who want to understand the implementations or develop their own functions, please read the detailed interface documentation in [Interfaces](docs/interfaces.md).
